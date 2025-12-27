@@ -61,7 +61,7 @@ const ClosedOrderBottomWindow = ({ selectedOrder, onClose }) => {
 
     const {
         symbol, side, product, lots, lot_size, closed_at,
-        _id: orderId, security_Id, segment, quantity, price, came_From
+        _id: orderId, instrument_token, segment, quantity, price, came_From
     } = selectedOrder;
 
     const tradingsymbol = selectedOrder.meta?.selectedStock?.tradingSymbol ?? symbol ?? "N/A";
@@ -120,7 +120,7 @@ const ClosedOrderBottomWindow = ({ selectedOrder, onClose }) => {
                 broker_id_str: brokerId,
                 customer_id_str: customerId,
                 order_id: orderId,
-                security_Id: security_Id,
+                instrument_token: instrument_token,
                 symbol: tradingsymbol,
                 side: orderSide,
                 product: product,
@@ -218,16 +218,16 @@ const ClosedOrderBottomWindow = ({ selectedOrder, onClose }) => {
 
             {/* Details Grid (Compact) */}
             <div className="mb-2 p-2 bg-[var(--bg-secondary)] rounded-md text-xs">
-                <DetailRow  label="Quantity" value={`${qty} shares`} />
-                <DetailRow  label="Lots (Size)" value={`${lots ?? '-'} (${lot_size ?? '-'})`} />
-                <DetailRow  label="Entry Price" value={money(entryPrice)} colorClass="text-yellow-300" />
-                <DetailRow  label="Exit Price" value={money(exitPrice)} colorClass="text-white" />
-                <DetailRow  label="Type" value={orderSide} colorClass={orderSide === 'BUY' ? "text-green-400" : "text-red-400"} />
-                <DetailRow  label="Product" value={productType} colorClass="text-indigo-300" />
-                <DetailRow  label="From" value={came_From} colorClass="text-indigo-300" />
-                <DetailRow  label="Closed At" value={closedTime} colorClass="text-gray-400 text-xs" />
-                <DetailRow  label="Expire Date" value={formattedStockExpireDate} colorClass="text-gray-400 text-xs" />
-                {selectedOrder.exit_reason && <DetailRow  label="exit_reason" value={selectedOrder.exit_reason} colorClass="text-gray-400 text-xs" />}
+                <DetailRow label="Quantity" value={`${qty} shares`} />
+                <DetailRow label="Lots (Size)" value={`${lots ?? '-'} (${lot_size ?? '-'})`} />
+                <DetailRow label="Entry Price" value={money(entryPrice)} colorClass="text-yellow-300" />
+                <DetailRow label="Exit Price" value={money(exitPrice)} colorClass="text-white" />
+                <DetailRow label="Type" value={orderSide} colorClass={orderSide === 'BUY' ? "text-green-400" : "text-red-400"} />
+                <DetailRow label="Product" value={productType} colorClass="text-indigo-300" />
+                <DetailRow label="From" value={came_From} colorClass="text-indigo-300" />
+                <DetailRow label="Closed At" value={closedTime} colorClass="text-gray-400 text-xs" />
+                <DetailRow label="Expire Date" value={formattedStockExpireDate} colorClass="text-gray-400 text-xs" />
+                {selectedOrder.exit_reason && <DetailRow label="exit_reason" value={selectedOrder.exit_reason} colorClass="text-gray-400 text-xs" />}
 
             </div>
 

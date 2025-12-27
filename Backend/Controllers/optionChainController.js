@@ -1,141 +1,83 @@
-import { getDhanOptionChain, getDhanExpiryList, getNearestExpiry } from '../services/dhanOptionChain.js';
+// Controllers/optionChainController.js
+// Option Chain Controller - Uses Kite instruments database and Quote API
+
+import {
+    getExpiryList as kiteGetExpiryList,
+    getNearestExpiry,
+    getOptionChain as kiteGetOptionChain,
+    getOptionSegment,
+    normalizeToOptionSegment
+} from '../services/kiteOptionChain.js';
 import Instrument from '../Model/InstrumentModel.js';
 
 /**
- * Get option chain data from Dhan API
+ * Get option chain data
  * Query params:
- *   - symbol: Either tradingSymbol or "segment|securityId" format
+ *   - name: Underlying name (e.g., "NIFTY", "HDFCBANK", "GOLD")
+ *   - segment: Option segment (optional, auto-detected)
  *   - expiry: Expiry date in YYYY-MM-DD format (optional, defaults to nearest)
  */
 async function getOptionChain(req, res) {
     try {
-        const { symbol, expiry } = req.query;
+        const { name, segment, expiry } = req.query;
 
         // Validate required parameters
-        if (!symbol) {
+        if (!name) {
             return res.status(400).json({
                 error: 'Missing required parameter',
-                details: 'symbol is required'
+                details: 'name is required (e.g., NIFTY, BANKNIFTY, HDFCBANK)'
             });
         }
 
-        // console.log('[OptionChainController] Request received:', { symbol, expiry });
+        const underlyingName = name.toUpperCase();
+        console.log('[OptionChainController] Request:', { underlyingName, segment, expiry });
 
-        // Parse symbol to get securityId, segment, and underlying info
-        let underlyingScrip, underlyingSeg, underlyingSymbol;
+        // Determine option segment - normalize FUT to OPT if needed
+        // e.g., NFO-FUT -> NFO-OPT, BFO-FUT -> BFO-OPT
+        const optionSegment = segment
+            ? normalizeToOptionSegment(segment)
+            : getOptionSegment(underlyingName);
+        console.log('[OptionChainController] Using segment:', optionSegment, '(input was:', segment, ')');
 
-        if (symbol.includes('|')) {
-            // Format: "NSE_FNO|58071"
-            const [segment, securityId] = symbol.split('|');
-            underlyingSeg = segment;
-
-            const instrument = await Instrument.findOne({
-                securityId: String(securityId),
-                segment: segment
-            }).lean();
-
-            if (!instrument) {
-                console.error('[OptionChainController] Instrument not found for securityId:', securityId);
-                return res.status(404).json({
-                    error: 'Instrument not found',
-                    details: `No instrument found with securityId: ${securityId} and segment: ${segment}`
-                });
-            }
-
-            underlyingScrip = instrument.securityId;
-            underlyingSymbol = instrument.underlying_symbol || instrument.symbol_name;
-
-            console.log('[OptionChainController] Found instrument:', {
-                underlyingScrip,
-                underlyingSeg,
-                underlyingSymbol
-            });
-        } else {
-            // Look up by trading symbol or underlying symbol
-            // console.log('[OptionChainController] Looking up instrument by symbol:', symbol);
-
-            const instrument = await Instrument.findOne({
-                $or: [
-                    { tradingsymbol: { $regex: new RegExp(`^${symbol}$`, 'i') } },
-                    { underlying_symbol: { $regex: new RegExp(`^${symbol}$`, 'i') } },
-                    { symbol_name: { $regex: new RegExp(`^${symbol}$`, 'i') } }
-                ]
-            }).lean();
-
-            if (!instrument) {
-                console.error('[OptionChainController] Instrument not found:', symbol);
-                return res.status(404).json({
-                    error: 'Instrument not found',
-                    details: `No instrument found with symbol: ${symbol}`
-                });
-            }
-
-            underlyingScrip = instrument.securityId;
-            underlyingSeg = instrument.segment;
-            underlyingSymbol = instrument.underlying_symbol || instrument.symbol_name;
-
-            // console.log('[OptionChainController] Found instrument:', {
-            //     underlyingScrip,
-            //     underlyingSeg,
-            //     underlyingSymbol
-            // });
-        }
-
-        // Map segment to Dhan format (IDX_I for indices, keep others as-is)
-        if (underlyingSeg === 'NSE_INDEX') {
-            underlyingSeg = 'IDX_I';
-        }
-
-        // If no expiry provided, fetch expiry list and use nearest
+        // If no expiry provided, get earliest available
         let targetExpiry = expiry;
         if (!targetExpiry) {
-            // console.log('[OptionChainController] No expiry provided, fetching expiry list');
-            
-            const expiries = await getDhanExpiryList({
-                underlyingScrip,
-                underlyingSeg
-            });
-
+            const expiries = await kiteGetExpiryList(underlyingName, optionSegment);
             targetExpiry = getNearestExpiry(expiries);
 
             if (!targetExpiry) {
                 return res.status(404).json({
                     error: 'No active expiries found',
-                    details: 'Could not find any future expiry dates for this instrument'
+                    details: `No future expiry dates found for ${underlyingName} in ${optionSegment}`
                 });
             }
-
-            // console.log('[OptionChainController] Using nearest expiry:', targetExpiry);
+            console.log('[OptionChainController] Using nearest expiry:', targetExpiry);
         }
 
-        // Fetch option chain from Dhan
-        const optionChainData = await getDhanOptionChain({
-            underlyingScrip,
-            underlyingSeg,
-            expiry: targetExpiry
+        // Build option chain
+        const optionChainData = await kiteGetOptionChain(underlyingName, optionSegment, targetExpiry);
+
+        if (!optionChainData.chain || optionChainData.chain.length === 0) {
+            return res.status(404).json({
+                error: 'No option chain data found',
+                details: `No options found for ${underlyingName} expiry ${targetExpiry}`
+            });
+        }
+
+        console.log('[OptionChainController] Success:', {
+            totalStrikes: optionChainData.totalStrikes,
+            spotPrice: optionChainData.spotPrice
         });
 
-        console.log('[OptionChainController] Successfully fetched option chain with', 
-                    optionChainData.totalStrikes, 'strikes');
-
-        // Batch lookup securityIds for all CE/PE contracts
-        // This enables WebSocket subscription for live data
-        const chainWithSecurityIds = await enrichChainWithSecurityIds(
-            optionChainData.chain,
-            underlyingSymbol,
-            targetExpiry
-        );
-
-        // Return formatted data
+        // Return response (same format as before for frontend compatibility)
         return res.json({
             ok: true,
             data: {
-                underlying: underlyingSymbol,
-                underlyingScrip,
-                underlyingSeg,
+                underlying: underlyingName,
+                segment: optionSegment,
                 expiry: targetExpiry,
-                spotPrice: optionChainData.underlyingLtp,
-                chain: chainWithSecurityIds,
+                spotPrice: optionChainData.spotPrice,
+                chain: optionChainData.chain,
                 meta: {
                     totalStrikes: optionChainData.totalStrikes,
                     timestamp: new Date().toISOString()
@@ -145,12 +87,10 @@ async function getOptionChain(req, res) {
 
     } catch (error) {
         console.error('[OptionChainController] Error:', error);
-
-        // Return user-friendly error
         return res.status(500).json({
             error: 'Failed to fetch option chain',
             details: error.message,
-            hint: 'Please check if the instrument supports options and has active expiries'
+            hint: 'Please check if the instrument has active option contracts'
         });
     }
 }
@@ -158,69 +98,28 @@ async function getOptionChain(req, res) {
 /**
  * Get list of available expiry dates for an underlying
  * Query params:
- *   - symbol: Either tradingSymbol or "segment|securityId" format
+ *   - name: Underlying name (e.g., "NIFTY", "HDFCBANK")
+ *   - segment: Option segment (optional)
  */
 async function getExpiryList(req, res) {
     try {
-        const { symbol } = req.query;
+        const { name, segment } = req.query;
 
-        if (!symbol) {
+        if (!name) {
             return res.status(400).json({
                 error: 'Missing required parameter',
-                details: 'symbol is required'
+                details: 'name is required'
             });
         }
 
-        console.log('[ExpiryListController] Request received:', { symbol });
+        const underlyingName = name.toUpperCase();
+        const optionSegment = segment
+            ? normalizeToOptionSegment(segment)
+            : getOptionSegment(underlyingName);
 
-        // Parse symbol (same logic as getOptionChain)
-        let underlyingScrip, underlyingSeg;
+        console.log('[ExpiryListController] Request:', { underlyingName, optionSegment, inputSegment: segment });
 
-        if (symbol.includes('|')) {
-            const [segment, securityId] = symbol.split('|');
-            underlyingSeg = segment;
-
-            const instrument = await Instrument.findOne({
-                securityId: String(securityId),
-                segment: segment
-            }).lean();
-
-            if (!instrument) {
-                return res.status(404).json({
-                    error: 'Instrument not found'
-                });
-            }
-
-            underlyingScrip = instrument.securityId;
-        } else {
-            const instrument = await Instrument.findOne({
-                $or: [
-                    { tradingsymbol: { $regex: new RegExp(`^${symbol}$`, 'i') } },
-                    { underlying_symbol: { $regex: new RegExp(`^${symbol}$`, 'i') } }
-                ]
-            }).lean();
-
-            if (!instrument) {
-                return res.status(404).json({
-                    error: 'Instrument not found'
-                });
-            }
-
-            underlyingScrip = instrument.securityId;
-            underlyingSeg = instrument.segment;
-        }
-
-        // Map segment
-        if (underlyingSeg === 'NSE_INDEX') {
-            underlyingSeg = 'IDX_I';
-        }
-
-        // Fetch expiry list
-        const expiries = await getDhanExpiryList({
-            underlyingScrip,
-            underlyingSeg
-        });
-
+        const expiries = await kiteGetExpiryList(underlyingName, optionSegment);
         const nearestExpiry = getNearestExpiry(expiries);
 
         console.log('[ExpiryListController] Found', expiries.length, 'expiries');
@@ -244,86 +143,29 @@ async function getExpiryList(req, res) {
 }
 
 /**
- * Lookup the security_Id for an option contract from instruments collection
+ * Lookup the instrument_token for an option contract
  * Query params:
- *   - underlying_symbol: e.g., "NIFTY", "HDFCBANK"
+ *   - name: Underlying name (e.g., "NIFTY", "HDFCBANK")
  *   - strike: Strike price (number)
  *   - optionType: "CE" or "PE"
  *   - expiry: Expiry date in YYYY-MM-DD format
  */
 async function getOptionSecurityId(req, res) {
     try {
-        const { underlying_symbol, strike, optionType, expiry } = req.query;
+        const { name, strike, optionType, expiry } = req.query;
 
-        if (!underlying_symbol || !strike || !optionType || !expiry) {
+        if (!name || !strike || !optionType || !expiry) {
             return res.status(400).json({
                 error: 'Missing required parameters',
-                details: 'underlying_symbol, strike, optionType, and expiry are required'
+                details: 'name, strike, optionType, and expiry are required'
             });
         }
 
-        console.log('[getOptionSecurityId] Looking up:', { underlying_symbol, strike, optionType, expiry });
+        const underlyingName = name.toUpperCase();
+        const optionSegment = getOptionSegment(underlyingName);
 
-        // Parse expiry date for range query (to handle timezone differences)
-        const expiryDate = new Date(expiry);
-        const expiryStart = new Date(expiryDate);
-        expiryStart.setHours(0, 0, 0, 0);
-        const expiryEnd = new Date(expiryDate);
-        expiryEnd.setHours(23, 59, 59, 999);
+        console.log('[getOptionSecurityId] Looking up:', { underlyingName, strike, optionType, expiry });
 
-        // Find the option contract in instruments collection
-        const instrument = await Instrument.findOne({
-            underlying_symbol: { $regex: new RegExp(`^${underlying_symbol}$`, 'i') },
-            strike: Number(strike),
-            optionType: optionType.toUpperCase(),
-            expiry: { $gte: expiryStart, $lte: expiryEnd },
-            segment: 'NSE_FNO'
-        }).lean();
-
-        if (!instrument) {
-            console.log('[getOptionSecurityId] No instrument found for:', { underlying_symbol, strike, optionType, expiry });
-            return res.status(404).json({
-                error: 'Option contract not found',
-                details: `No option found for ${underlying_symbol} ${strike} ${optionType} expiring ${expiry}`
-            });
-        }
-
-        console.log('[getOptionSecurityId] Found instrument:', {
-            securityId: instrument.securityId,
-            tradingsymbol: instrument.tradingsymbol,
-            lotSize: instrument.lotSize
-        });
-
-        return res.json({
-            ok: true,
-            data: {
-                securityId: instrument.securityId,
-                tradingsymbol: instrument.tradingsymbol,
-                segment: instrument.segment,
-                lotSize: instrument.lotSize,
-                tickSize: instrument.tickSize
-            }
-        });
-
-    } catch (error) {
-        console.error('[getOptionSecurityId] Error:', error);
-        return res.status(500).json({
-            error: 'Failed to lookup option security ID',
-            details: error.message
-        });
-    }
-}
-
-/**
- * Enrich option chain data with securityIds for WebSocket subscription
- * Performs batch lookup for all CE/PE contracts in the chain
- */
-async function enrichChainWithSecurityIds(chain, underlyingSymbol, expiry) {
-    if (!chain || chain.length === 0) {
-        return chain;
-    }
-
-    try {
         // Parse expiry date for range query
         const expiryDate = new Date(expiry);
         const expiryStart = new Date(expiryDate);
@@ -331,64 +173,42 @@ async function enrichChainWithSecurityIds(chain, underlyingSymbol, expiry) {
         const expiryEnd = new Date(expiryDate);
         expiryEnd.setHours(23, 59, 59, 999);
 
-        // Extract all strikes from the chain
-        const strikes = chain.map(row => Number(row.strike));
-
-        // Batch query all option contracts for this underlying and expiry
-        const instruments = await Instrument.find({
-            underlying_symbol: { $regex: new RegExp(`^${underlyingSymbol}$`, 'i') },
-            strike: { $in: strikes },
+        // Find the option contract
+        const instrument = await Instrument.findOne({
+            name: underlyingName,
+            strike: Number(strike),
+            instrument_type: optionType.toUpperCase(),
             expiry: { $gte: expiryStart, $lte: expiryEnd },
-            segment: 'NSE_FNO',
-            optionType: { $in: ['CE', 'PE'] }
+            segment: optionSegment
         }).lean();
 
-        // Create lookup map: "strike|optionType" -> instrument data
-        const instrumentMap = new Map();
-        for (const inst of instruments) {
-            const key = `${inst.strike}|${inst.optionType}`;
-            instrumentMap.set(key, {
-                securityId: inst.securityId,
-                tradingsymbol: inst.tradingsymbol,
-                lotSize: inst.lotSize,
-                tickSize: inst.tickSize
+        if (!instrument) {
+            console.log('[getOptionSecurityId] No instrument found');
+            return res.status(404).json({
+                error: 'Option contract not found',
+                details: `No option found for ${underlyingName} ${strike} ${optionType} expiring ${expiry}`
             });
         }
 
-        console.log(`[enrichChainWithSecurityIds] Found ${instruments.length} instruments for ${chain.length} strikes`);
+        console.log('[getOptionSecurityId] Found:', instrument.tradingsymbol);
 
-        // Enrich chain with security IDs
-        const enrichedChain = chain.map(row => {
-            const ceKey = `${row.strike}|CE`;
-            const peKey = `${row.strike}|PE`;
-            const ceInstrument = instrumentMap.get(ceKey);
-            const peInstrument = instrumentMap.get(peKey);
-
-            return {
-                ...row,
-                call: row.call ? {
-                    ...row.call,
-                    securityId: ceInstrument?.securityId || null,
-                    tradingsymbol: ceInstrument?.tradingsymbol || null,
-                    lotSize: ceInstrument?.lotSize || null,
-                    tickSize: ceInstrument?.tickSize || null
-                } : null,
-                put: row.put ? {
-                    ...row.put,
-                    securityId: peInstrument?.securityId || null,
-                    tradingsymbol: peInstrument?.tradingsymbol || null,
-                    lotSize: peInstrument?.lotSize || null,
-                    tickSize: peInstrument?.tickSize || null
-                } : null
-            };
+        return res.json({
+            ok: true,
+            data: {
+                instrument_token: instrument.instrument_token,
+                tradingsymbol: instrument.tradingsymbol,
+                segment: instrument.segment,
+                lot_size: instrument.lot_size,
+                tick_size: instrument.tick_size
+            }
         });
 
-        return enrichedChain;
-
     } catch (error) {
-        console.error('[enrichChainWithSecurityIds] Error:', error);
-        // Return original chain if enrichment fails
-        return chain;
+        console.error('[getOptionSecurityId] Error:', error);
+        return res.status(500).json({
+            error: 'Failed to lookup option',
+            details: error.message
+        });
     }
 }
 

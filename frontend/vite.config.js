@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
 // App version - INCREMENT THIS ON EVERY DEPLOYMENT
-const APP_VERSION = '1.0.1';
+const APP_VERSION = '1.8.3';
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -17,11 +17,11 @@ export default defineConfig({
         host: '0.0.0.0', // Bind to all network interfaces for tunnel
         port: 5173,
         strictPort: true,
-        allowedHosts: ['devakibrokerage.in', 'localhost', '127.0.0.1'],
+        allowedHosts: ['kite.wolfkrypt.me', 'localhost', '127.0.0.1'],
         proxy: {
-            "/api": "http://localhost:8080",
+            "/api": "https://api.wolfkrypt.me",
             "/socket.io": {
-                target: "http://localhost:8080",
+                target: "https://api.wolfkrypt.me",
                 ws: true
             }
         },
@@ -39,7 +39,7 @@ export default defineConfig({
                     'chart-vendor': ['lightweight-charts'],
                     'socket-vendor': ['socket.io-client'],
                     'framer-vendor': ['framer-motion'],
-                    
+
                     // Only chunk lazy-loaded pages for code splitting
                     'chart': ['./src/page/Chart/TradingChart.jsx'],
                 }

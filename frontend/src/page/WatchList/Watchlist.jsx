@@ -253,36 +253,9 @@ function Watchlist() {
     } catch (e) { console.warn(e); }
   }, [subscribe, apiBase, token]);
 
-  const handleUpgradeToFull = useCallback(async (instrument) => {
-    if (!instrument || isUpgradingRef.current) return;
-    const instrumentKey = instrument.instrument_token;
-    if (openedInstrumentRef.current?.key === instrumentKey) return;
-    isUpgradingRef.current = true;
-    const sub = [{ instrument_token: instrument.instrument_token }];
-    try { await unsubscribe(sub, 'quote'); } catch (e) { }
-    try {
-      await subscribe(sub, 'full');
-      openedInstrumentRef.current = { ...instrument, key: instrumentKey };
-    } catch (e) { }
-    try {
-      const r = await fetch(`${apiBase}/api/quotes/snapshot`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        credentials: "include",
-        body: JSON.stringify({ items: sub }),
-      });
-      const map = r.ok ? await r.json() : {};
-      setSnapshots(prev => ({ ...prev, ...map }));
-    } catch (e) { } finally { isUpgradingRef.current = false; }
-  }, [subscribe, unsubscribe, apiBase, token]);
+  // Upgrade/Downgrade logic removed as per request - Watchlist now defaults to 'full' mode
+  // The selectedStock state now just tracks which item is open in bottom window
 
-  const handleDowngradeToQuote = useCallback(async () => {
-    const instrument = openedInstrumentRef.current;
-    if (!instrument) return;
-    const sub = [{ instrument_token: instrument.instrument_token }];
-    try { await unsubscribe(sub, 'full'); } catch (e) { }
-    try { await subscribe(sub, 'quote'); openedInstrumentRef.current = null; } catch (e) { }
-  }, [subscribe, unsubscribe]);
 
 
   // *** REMOVE FUNCTION (Optimistic UI) - Kite format ***
@@ -318,9 +291,9 @@ function Watchlist() {
         }
       );
 
-      // Unsubscribe (Cleanup)
+      // Subscriptions now default to 'full' mode for Watchlist
       const sub = [{ instrument_token: stock.instrument_token }];
-      unsubscribe(sub, 'quote').catch(console.warn);
+      unsubscribe(sub, 'full').catch(console.warn);
 
       if (!response.ok) {
         console.error("API failed to remove, but UI updated.");
@@ -359,9 +332,9 @@ function Watchlist() {
           setIndexInstruments(formattedIndexes);
           setStocks(uniqueWatchlist);
 
-          // Subscribe in background
-          if (formattedIndexes.length > 0) subscribeAndSnapshot(formattedIndexes, 'quote');
-          if (uniqueWatchlist.length > 0) subscribeAndSnapshot(uniqueWatchlist, 'quote');
+          // Subscribe in background - Watchlist uses FULL mode
+          if (formattedIndexes.length > 0) subscribeAndSnapshot(formattedIndexes, 'full');
+          if (uniqueWatchlist.length > 0) subscribeAndSnapshot(uniqueWatchlist, 'full');
 
           setIsLoading(false);
           const elapsed = performance.now() - startTime;
@@ -408,10 +381,10 @@ function Watchlist() {
         sessionStorage.setItem('watchlist_cache_time', now.toString());
         console.log(`[Watchlist Load] Cached ${uniqueWatchlist.length} instruments`);
 
-        // Subscribe to market data
+        // Subscribe to market data - default to FULL mode for watchlist
         const subStart = performance.now();
-        if (formattedIndexes.length > 0) await subscribeAndSnapshot(formattedIndexes, 'quote');
-        if (uniqueWatchlist.length > 0) await subscribeAndSnapshot(uniqueWatchlist, 'quote');
+        if (formattedIndexes.length > 0) await subscribeAndSnapshot(formattedIndexes, 'full');
+        if (uniqueWatchlist.length > 0) await subscribeAndSnapshot(uniqueWatchlist, 'full');
         const subElapsed = performance.now() - subStart;
         console.log(`[Watchlist Load] Subscriptions completed in ${subElapsed.toFixed(0)}ms`);
 
@@ -521,10 +494,7 @@ function Watchlist() {
     setQuantity(1);
   }, [selectedStock, prices]);
 
-  useEffect(() => {
-    if (selectedStock) handleUpgradeToFull(selectedStock);
-    else if (openedInstrumentRef.current) handleDowngradeToQuote();
-  }, [selectedStock]);
+  // Upgrade/Upgrade effect removed
 
   const sheetData = selectedStock ? prices[selectedStock.id] || {} : {};
 

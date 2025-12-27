@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { RefreshCw, LogOut, Key, CheckCircle, XCircle, Clock, AlertTriangle } from 'lucide-react';
+import { RefreshCw, LogOut, Key, CheckCircle, XCircle, Clock, AlertTriangle, ExternalLink } from 'lucide-react';
 
 const AdminAccessToken = () => {
     const navigate = useNavigate();
@@ -8,6 +8,7 @@ const AdminAccessToken = () => {
     const [tokenStatus, setTokenStatus] = useState(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const [manualLoginLoading, setManualLoginLoading] = useState(false);
     const [error, setError] = useState(null);
 
     const apiBase = import.meta.env.VITE_REACT_APP_API_URL || '';
@@ -69,6 +70,28 @@ const AdminAccessToken = () => {
             setError(err.message);
         } finally {
             setRefreshing(false);
+        }
+    };
+
+    // Manual Login - opens Kite login in new tab
+    const handleManualLogin = async () => {
+        setManualLoginLoading(true);
+        setError(null);
+        try {
+            const res = await fetch(`${apiBase}/api/kite/login-url`);
+            const data = await res.json();
+
+            if (data.success && data.loginUrl) {
+                // Open login URL in new tab
+                window.open(data.loginUrl, '_blank');
+            } else {
+                setError(data.error || 'Failed to get login URL');
+            }
+        } catch (err) {
+            console.error('[AdminAccessToken] Manual login error:', err);
+            setError(err.message);
+        } finally {
+            setManualLoginLoading(false);
         }
     };
 
@@ -141,8 +164,8 @@ const AdminAccessToken = () => {
                             key={tab.path}
                             onClick={() => navigate(tab.path)}
                             className={`px-4 py-2 rounded-lg font-semibold text-sm transition ${location.pathname === tab.path
-                                    ? 'bg-indigo-600 text-white'
-                                    : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+                                ? 'bg-indigo-600 text-white'
+                                : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
                                 }`}
                         >
                             {tab.label}
@@ -232,8 +255,8 @@ const AdminAccessToken = () => {
                         <div className="bg-[var(--bg-card)] rounded-xl border border-[var(--border-color)] p-4">
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <h3 className="font-semibold text-[var(--text-primary)]">Refresh Token</h3>
-                                    <p className="text-sm text-[var(--text-muted)]">Trigger auto-login to get a new token</p>
+                                    <h3 className="font-semibold text-[var(--text-primary)]">Auto Refresh Token</h3>
+                                    <p className="text-sm text-[var(--text-muted)]">Trigger auto-login (may fail if CAPTCHA required)</p>
                                 </div>
                                 <button
                                     onClick={handleRefreshToken}
@@ -242,6 +265,24 @@ const AdminAccessToken = () => {
                                 >
                                     <RefreshCw className={`w-5 h-5 ${refreshing ? 'animate-spin' : ''}`} />
                                     {refreshing ? 'Refreshing...' : 'Refresh Now'}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Manual Login */}
+                        <div className="bg-[var(--bg-card)] rounded-xl border border-[var(--border-color)] p-4">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <h3 className="font-semibold text-[var(--text-primary)]">Manual Login</h3>
+                                    <p className="text-sm text-[var(--text-muted)]">Opens Kite login in new tab (use if CAPTCHA required)</p>
+                                </div>
+                                <button
+                                    onClick={handleManualLogin}
+                                    disabled={manualLoginLoading}
+                                    className="px-6 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition disabled:opacity-50 flex items-center gap-2"
+                                >
+                                    <ExternalLink className={`w-5 h-5 ${manualLoginLoading ? 'animate-pulse' : ''}`} />
+                                    {manualLoginLoading ? 'Opening...' : 'Login via Kite'}
                                 </button>
                             </div>
                         </div>

@@ -16,7 +16,7 @@ const postOrder = asyncHandler(async (req, res) => {
   const {
     broker_id_str,
     customer_id_str,
-    security_Id,
+    instrument_token,  // Kite field (replaces Dhan's security_Id)
     symbol,
     side,
     product,
@@ -33,10 +33,10 @@ const postOrder = asyncHandler(async (req, res) => {
     return res
       .status(400)
       .json({ error: "broker_id_str and customer_id_str are required" });
-  if (!security_Id || !symbol)
+  if (!instrument_token || !symbol)
     return res
       .status(400)
-      .json({ error: "security_Id and symbol are required" });
+      .json({ error: "instrument_token and symbol are required" });
   if (!side || !["BUY", "SELL"].includes(side))
     return res.status(400).json({ error: "side must be BUY or SELL" });
   if (
@@ -75,14 +75,14 @@ const postOrder = asyncHandler(async (req, res) => {
   // --- SPECIAL LOGIC: DAILY 10% LIMIT FOR OPTIONS ---
   const symUpper = String(symbol).toUpperCase();
   const isOption = (symUpper.endsWith("CE") || symUpper.endsWith("PE") || symUpper.endsWith("CALL") || symUpper.endsWith("PUT"));
-  
+
   if (isOption) {
-      const limitCheck = checkOptionLimit(fund, productNorm, requiredMargin);
-      if (!limitCheck.allowed) {
-          return res.status(400).json({
-              error: limitCheck.message
-          });
-      }
+    const limitCheck = checkOptionLimit(fund, productNorm, requiredMargin);
+    if (!limitCheck.allowed) {
+      return res.status(400).json({
+        error: limitCheck.message
+      });
+    }
   }
   // --------------------------------------------------
 
@@ -113,10 +113,10 @@ const postOrder = asyncHandler(async (req, res) => {
 
   // Update Option Usage
   if (isOption) {
-      console.log(`[OrderController] Updating Option Usage: Symbol=${symbol}, Product=${productNorm}, Margin=${requiredMargin}, Price=${price}`);
-      updateOptionUsage(fund, productNorm, requiredMargin);
+    console.log(`[OrderController] Updating Option Usage: Symbol=${symbol}, Product=${productNorm}, Margin=${requiredMargin}, Price=${price}`);
+    updateOptionUsage(fund, productNorm, requiredMargin);
   } else {
-      console.log(`[OrderController] Not an Option: Symbol=${symbol}`);
+    console.log(`[OrderController] Not an Option: Symbol=${symbol}`);
   }
 
   await fund.save();
@@ -128,7 +128,7 @@ const postOrder = asyncHandler(async (req, res) => {
   const orderDoc = new Order({
     broker_id_str: String(broker_id_str),
     customer_id_str: String(customer_id_str),
-    security_Id: String(security_Id),
+    instrument_token: String(instrument_token),  // Kite field
     symbol: String(symbol),
     segment: String(segment),
     side,
@@ -150,8 +150,9 @@ const postOrder = asyncHandler(async (req, res) => {
 
     // Add to RAM (For Auto-Exit)
     addToWatchlist(saved);
+    // Subscribe using instrument_token for Kite WebSocket
     dhanSocket.subscribe([
-      { segment: saved.segment, securityId: saved.security_Id },
+      { instrument_token: saved.instrument_token },
     ]);
 
     return res.json({ ok: true, message: "Order saved", order: saved });
@@ -162,12 +163,12 @@ const postOrder = asyncHandler(async (req, res) => {
     } else {
       fund.overnight.available_limit += requiredMargin;
     }
-    
+
     // Rollback Option Limit
     const symUpperRollback = String(symbol).toUpperCase();
     const isOptionRollback = (symUpperRollback.endsWith("CE") || symUpperRollback.endsWith("PE") || symUpperRollback.endsWith("CALL") || symUpperRollback.endsWith("PUT"));
     if (isOptionRollback) {
-        rollbackOptionUsage(fund, productNorm, requiredMargin);
+      rollbackOptionUsage(fund, productNorm, requiredMargin);
     }
 
     await fund.save();
@@ -224,19 +225,19 @@ const updateOrder = asyncHandler(async (req, res) => {
   const {
     broker_id_str,
     customer_id_str,
-    order_id, 
-    security_Id,
+    order_id,
+    instrument_token,  // Kite field
     symbol,
     side,
     product,
     quantity,
-    lots,    
-    price, 
+    lots,
+    price,
     order_status,
     segment,
     closed_ltp,
     closed_at,
-    came_From, 
+    came_From,
     stop_loss,
     target,
     ...rest
@@ -248,14 +249,14 @@ const updateOrder = asyncHandler(async (req, res) => {
 
   // Update Object Creation
   const update = {};
-  
+
   if (quantity) update.quantity = Number(quantity);
   if (lots) update.lots = Number(lots);
   if (price && order_status !== 'CLOSED') update.price = Number(price);
   if (order_status) update.order_status = order_status;
   if (closed_ltp) update.closed_ltp = Number(closed_ltp);
   if (closed_at) update.closed_at = closed_at;
-  
+
   // 👇 Fix: Add came_From to update object
   if (came_From) update.came_From = String(came_From).trim();
 
@@ -275,127 +276,127 @@ const updateOrder = asyncHandler(async (req, res) => {
     }
 
     // 2. Find Fund
-    const fund = await Fund.findOne({ 
-        broker_id_str: existing.broker_id_str, 
-        customer_id_str: existing.customer_id_str 
+    const fund = await Fund.findOne({
+      broker_id_str: existing.broker_id_str,
+      customer_id_str: existing.customer_id_str
     });
 
     if (!fund) {
-        return res.status(404).json({ success: false, message: "Fund account not found" });
+      return res.status(404).json({ success: false, message: "Fund account not found" });
     }
 
- 
-    const currentProduct = update.product || existing.product; 
+
+    const currentProduct = update.product || existing.product;
     const currentStatus = update.order_status || existing.order_status;
     const isHold = currentStatus === 'HOLD';
-    const isIntraday = String(currentProduct).trim().toUpperCase() === 'MIS' || isHold; 
+    const isIntraday = String(currentProduct).trim().toUpperCase() === 'MIS' || isHold;
 
-   
+
     const existingIsIntraday = String(existing.product).trim().toUpperCase() === 'MIS';
 
 
     if (update.quantity && update.quantity > existing.quantity && existing.order_status !== 'CLOSED') {
-        
-        const newQty = Number(update.quantity);
-        const calcPrice = update.price ? Number(update.price) : Number(existing.price);
-        
-        const oldMargin = existing.margin_blocked || (existing.quantity * existing.price);
-        const newTotalMargin = newQty * calcPrice;
-        
-        const marginToDeduct = newTotalMargin - oldMargin;
 
-        if (marginToDeduct > 0) {
-       
-            let availableLimit = 0;
-            let currentUsed = 0; 
+      const newQty = Number(update.quantity);
+      const calcPrice = update.price ? Number(update.price) : Number(existing.price);
 
-            if (isIntraday) {
-              
-                availableLimit = fund.intraday.available_limit;
-                currentUsed = fund.intraday.used_limit;
-            } else {
-                // Overnight Logic (Direct Cash)
-                availableLimit = fund.overnight.available_limit;
-                currentUsed = 0;
-            }
+      const oldMargin = existing.margin_blocked || (existing.quantity * existing.price);
+      const newTotalMargin = newQty * calcPrice;
 
-            const freeLimit = availableLimit - currentUsed;
+      const marginToDeduct = newTotalMargin - oldMargin;
 
-            if (marginToDeduct > freeLimit) {
-                return res.status(400).json({ 
-                    success: false, 
-                    message: `Insufficient Funds! Required: ${marginToDeduct.toFixed(2)}, Available: ${freeLimit.toFixed(2)}` 
-                });
-            }
+      if (marginToDeduct > 0) {
 
-            // --- 10% OPTION LIMIT CHECK (Update Scenario) ---
-            const exSymUpper = String(existing.symbol).toUpperCase();
-            const isOptionUpdate = (exSymUpper.endsWith("CE") || exSymUpper.endsWith("PE") || exSymUpper.endsWith("CALL") || exSymUpper.endsWith("PUT"));
-            if (isOptionUpdate) {
-                const limitCheck = checkOptionLimit(fund, currentProduct, marginToDeduct);
-                if (!limitCheck.allowed) {
-                    // Slight change: message might refer to "Required" which here implies "Additional Required"
-                     return res.status(400).json({ 
-                        success: false, 
-                        message: limitCheck.message.replace('Required:', 'Additional Required:')
-                    });
-                }
-                
-                updateOptionUsage(fund, currentProduct, marginToDeduct);
-            }
-            // -----------------------------------------------
+        let availableLimit = 0;
+        let currentUsed = 0;
 
-            // *** UPDATE FUND ***
-            if (isIntraday) {
-                // Intraday/HOLD: Increase Used Limit
-                fund.intraday.used_limit += marginToDeduct;
-            } else {
-                // Overnight (NRML): Decrease Available Limit
-                fund.overnight.available_limit -= marginToDeduct;
-            }
-            
-            // Record new total margin
-            update.margin_blocked = newTotalMargin;
+        if (isIntraday) {
+
+          availableLimit = fund.intraday.available_limit;
+          currentUsed = fund.intraday.used_limit;
+        } else {
+          // Overnight Logic (Direct Cash)
+          availableLimit = fund.overnight.available_limit;
+          currentUsed = 0;
         }
-    } 
-    
+
+        const freeLimit = availableLimit - currentUsed;
+
+        if (marginToDeduct > freeLimit) {
+          return res.status(400).json({
+            success: false,
+            message: `Insufficient Funds! Required: ${marginToDeduct.toFixed(2)}, Available: ${freeLimit.toFixed(2)}`
+          });
+        }
+
+        // --- 10% OPTION LIMIT CHECK (Update Scenario) ---
+        const exSymUpper = String(existing.symbol).toUpperCase();
+        const isOptionUpdate = (exSymUpper.endsWith("CE") || exSymUpper.endsWith("PE") || exSymUpper.endsWith("CALL") || exSymUpper.endsWith("PUT"));
+        if (isOptionUpdate) {
+          const limitCheck = checkOptionLimit(fund, currentProduct, marginToDeduct);
+          if (!limitCheck.allowed) {
+            // Slight change: message might refer to "Required" which here implies "Additional Required"
+            return res.status(400).json({
+              success: false,
+              message: limitCheck.message.replace('Required:', 'Additional Required:')
+            });
+          }
+
+          updateOptionUsage(fund, currentProduct, marginToDeduct);
+        }
+        // -----------------------------------------------
+
+        // *** UPDATE FUND ***
+        if (isIntraday) {
+          // Intraday/HOLD: Increase Used Limit
+          fund.intraday.used_limit += marginToDeduct;
+        } else {
+          // Overnight (NRML): Decrease Available Limit
+          fund.overnight.available_limit -= marginToDeduct;
+        }
+
+        // Record new total margin
+        update.margin_blocked = newTotalMargin;
+      }
+    }
+
 
     else if (update.order_status === 'CLOSED' && existing.order_status === 'OPEN' && existingIsIntraday) {
-        
-        const marginToRelease = existing.margin_blocked || (existing.price * existing.quantity);
 
-        if (marginToRelease > 0) {
-            // For intraday we reduce used_limit by the blocked margin (i.e. free up the limit)
-            fund.intraday.used_limit -= marginToRelease;
-            if (fund.intraday.used_limit < 0) fund.intraday.used_limit = 0;
-        }
+      const marginToRelease = existing.margin_blocked || (existing.price * existing.quantity);
 
-        // Ensure we clear margin_blocked on the order
-        update.margin_blocked = 0;
+      if (marginToRelease > 0) {
+        // For intraday we reduce used_limit by the blocked margin (i.e. free up the limit)
+        fund.intraday.used_limit -= marginToRelease;
+        if (fund.intraday.used_limit < 0) fund.intraday.used_limit = 0;
+      }
+
+      // Ensure we clear margin_blocked on the order
+      update.margin_blocked = 0;
     }
 
     else if (update.order_status === 'HOLD' && existing.order_status === 'OPEN' && existingIsIntraday) {
-        // Do not touch fund limits; only clear margin on the order
-        update.margin_blocked = 0;
+      // Do not touch fund limits; only clear margin on the order
+      update.margin_blocked = 0;
     }
 
- 
+
     else if (update.order_status === 'CLOSED' && existing.order_status !== 'CLOSED') {
-        
-        const marginToRelease = existing.margin_blocked || (existing.price * existing.quantity);
 
-        if (marginToRelease > 0) {
-            if (isIntraday) {
-                // If currentProduct indicates intraday for the updated state, we reduce used_limit.
-                fund.intraday.used_limit -= marginToRelease;
-                if (fund.intraday.used_limit < 0) fund.intraday.used_limit = 0;
-            } else {
-                fund.overnight.available_limit += marginToRelease;
-            }
+      const marginToRelease = existing.margin_blocked || (existing.price * existing.quantity);
+
+      if (marginToRelease > 0) {
+        if (isIntraday) {
+          // If currentProduct indicates intraday for the updated state, we reduce used_limit.
+          fund.intraday.used_limit -= marginToRelease;
+          if (fund.intraday.used_limit < 0) fund.intraday.used_limit = 0;
+        } else {
+          fund.overnight.available_limit += marginToRelease;
         }
+      }
 
-        // Clear margin on DB as well
-        update.margin_blocked = 0;
+      // Clear margin on DB as well
+      update.margin_blocked = 0;
     }
 
     await fund.save();
@@ -409,7 +410,7 @@ const updateOrder = asyncHandler(async (req, res) => {
 
     // 👇 Update Watchlist (Auto-Exit System)
     if (updated.order_status !== 'CLOSED') {
-        updateTriggerInWatchlist(updated);
+      updateTriggerInWatchlist(updated);
     }
 
     return res.status(200).json({ success: true, message: 'Order updated', order: updated });

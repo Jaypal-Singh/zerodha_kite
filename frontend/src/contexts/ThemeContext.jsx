@@ -15,13 +15,13 @@ export const ThemeProvider = ({ children }) => {
   const [theme, setTheme] = useState(() => {
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme) return savedTheme;
-    
+
     // Optional: Check system preference
     // if (window.matchMedia('(prefers-color-scheme: light)').matches) {
     //   return 'light';
     // }
-    
-    return 'dark'; // Default to dark mode (current app state)
+
+    return 'light'; // Default
   });
 
   // Apply theme to document when it changes

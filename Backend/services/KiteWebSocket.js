@@ -266,33 +266,31 @@ export class KiteWebSocket {
   }
 
   subscribeTokens(tokens, mode = 'full') {
-    // Deduplicate tokens
+    // 1. Filter new tokens that need subscription
     const newTokens = tokens.filter(t => !this.subscribedTokens.has(t));
 
-    if (!newTokens.length) {
-      console.log(`[KiteWS] All ${tokens.length} tokens already subscribed`);
-      return;
-    }
-
-    console.log(`[KiteWS] Subscribing to ${newTokens.length} tokens in '${mode}' mode`);
-
     try {
-      // Subscribe to tokens
-      this.ticker.subscribe(newTokens);
+      // Subscribe to NEW tokens only
+      if (newTokens.length > 0) {
+        console.log(`[KiteWS] Subscribing to ${newTokens.length} new tokens`);
+        this.ticker.subscribe(newTokens);
+        newTokens.forEach(token => this.subscribedTokens.add(token));
+      }
 
-      // Set mode using ticker's mode constants
+      // 2. ALWAYS set mode for ALL requested tokens (to allow upgrades/downgrades)
+      // This fixes the issue where upgrading 'quote' -> 'full' was ignored if already subscribed
       const modeMap = {
         'ltp': this.ticker.modeLTP,
         'quote': this.ticker.modeQuote,
         'full': this.ticker.modeFull
       };
       const tickerMode = modeMap[mode] || this.ticker.modeFull;
-      this.ticker.setMode(tickerMode, newTokens);
 
-      // Track subscribed tokens
-      newTokens.forEach(token => this.subscribedTokens.add(token));
-
-      console.log(`[KiteWS] ✅ Subscribed. Total active: ${this.subscribedTokens.size}`);
+      // Only set mode if there are tokens to set
+      if (tokens.length > 0) {
+        this.ticker.setMode(tickerMode, tokens);
+        console.log(`[KiteWS] Set mode '${mode}' for ${tokens.length} tokens`);
+      }
     } catch (error) {
       console.error("[KiteWS] Subscription error:", error?.message || error);
     }

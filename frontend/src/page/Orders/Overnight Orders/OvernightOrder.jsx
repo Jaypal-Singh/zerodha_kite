@@ -35,20 +35,7 @@ export default function OvernightOrder() {
   const apiBase = import.meta.env.VITE_REACT_APP_API_URL || "";
   const token = localStorage.getItem("token") || null;
 
-  // Segment mapping for tick key generation
-  const segmentStringToNumberMap = useMemo(
-    () => ({
-      NSE_EQ: 1,
-      NSE_FNO: 2,
-      MCX_COMM: 5,
-      BSE_EQ: 4,
-      NSE_INDEX: 0,
-      IDX_I: 0,
-      BSE_INDEX: 0,
-      BSE_FNO: 8,
-    }),
-    []
-  );
+  // Segment map no longer needed - using instrument_token directly
 
   const handleOrderSelect = (orderData) => {
     setSelectedOrderData(orderData);
@@ -142,13 +129,12 @@ export default function OvernightOrder() {
 
     (async () => {
       try {
+        // Use instrument_token for Kite WebSocket subscription
         const items = instrumentData
           .map((item) => {
-            const segment = item.segment ?? item.exchange ?? null;
-            const rawSecurityId =
-              item.securityId ?? item.security_Id ?? item.id ?? null;
-            if (!segment || rawSecurityId == null) return null;
-            return { segment, securityId: String(rawSecurityId) };
+            const token = item.instrument_token;
+            if (!token) return null;
+            return { instrument_token: String(token) };
           })
           .filter(Boolean);
 
@@ -225,14 +211,12 @@ export default function OvernightOrder() {
 
     // cleanup
     return () => {
+      // Unsubscribe using instrument_token
       const items = instrumentData
         .map((item) => ({
-          segment: item.segment ?? item.exchange ?? null,
-          securityId: String(
-            item.securityId ?? item.security_Id ?? item.id ?? null
-          ),
+          instrument_token: String(item.instrument_token)
         }))
-        .filter((i) => i.segment && i.securityId);
+        .filter((i) => i.instrument_token);
 
       if (items.length > 0) {
         console.log(
@@ -272,9 +256,8 @@ export default function OvernightOrder() {
       let hasUpdates = false;
 
       currentData.forEach(inst => {
-        const securityKey = String(inst.security_Id ?? inst.securityId ?? inst.id ?? "");
-        const numericSegment = segmentStringToNumberMap[inst.segment];
-        const tickKey = `${numericSegment}-${securityKey}`;
+        // Use instrument_token directly as key (Kite format)
+        const tickKey = String(inst.instrument_token);
         const tick = ticksMap.get(tickKey);
         if (tick) {
           newTicks[tickKey] = tick;
@@ -291,9 +274,8 @@ export default function OvernightOrder() {
 
     animationFrameId = requestAnimationFrame(updateLoop);
     return () => cancelAnimationFrame(animationFrameId);
-  }, [segmentStringToNumberMap]);
+  }, []);
 
-  // Merge instrument + snapshot + real-time tick data
   useEffect(() => {
     if (!instrumentData || instrumentData.length === 0) {
       setAllData([]);
@@ -301,45 +283,21 @@ export default function OvernightOrder() {
     }
 
     const merged = instrumentData.map((inst) => {
-      const securityKey = String(
-        inst.security_Id ?? inst.securityId ?? inst.id ?? ""
-      );
+      // Use instrument_token as the key
+      const tickKey = String(inst.instrument_token);
       let snapshot = null;
 
       if (orders && typeof orders === "object") {
-        snapshot =
-          orders[securityKey] ?? orders[String(inst.securityId ?? "")] ?? null;
-
-        if (!snapshot && inst.segment) {
-          snapshot = orders[`${inst.segment}|${securityKey}`] ?? null;
-        }
-
-        if (!snapshot) {
-          for (const k of Object.keys(orders)) {
-            const v = orders[k];
-            if (!v) continue;
-            const vid = String(
-              v.securityId ?? v.security_Id ?? v.id ?? ""
-            );
-            if (vid && vid === securityKey) {
-              snapshot = v;
-              break;
-            }
-          }
-        }
+        snapshot = orders[tickKey] ?? null;
       }
 
-      const numericSegment = segmentStringToNumberMap[inst.segment];
-      const tickKey = `${numericSegment}-${securityKey}`;
       const tick = liveTicks[tickKey] || {};
-
       const combined = { ...snapshot, ...tick };
-
       return { ...inst, snapshot: combined };
     });
 
     setAllData(merged);
-  }, [instrumentData, orders, liveTicks, segmentStringToNumberMap]);
+  }, [instrumentData, orders, liveTicks]);
 
   const selectedOrderMarketData = useMemo(() => {
     if (!selectedOrderData) return {};
@@ -347,8 +305,8 @@ export default function OvernightOrder() {
     const foundItem = allData.find(
       (item) =>
         item._id === selectedOrderData._id ||
-        (item.security_Id &&
-          item.security_Id === selectedOrderData.security_Id)
+        (item.instrument_token &&
+          item.instrument_token === selectedOrderData.instrument_token)
     );
 
     return foundItem?.snapshot ?? {};
@@ -399,7 +357,7 @@ export default function OvernightOrder() {
               key={
                 data._id ||
                 data.id ||
-                `${data.segment}-${data.security_Id}-${idx}`
+                `${data.segment}-${data.instrument_token}-${idx}`
               }
               className="relative bg-[#121a2b] rounded-lg p-3 border border-white/10 hover:bg-[#222a41] transition cursor-pointer"
               onClick={() => handleOrderSelect(data)}

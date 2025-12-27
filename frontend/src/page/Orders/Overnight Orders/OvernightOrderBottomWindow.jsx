@@ -26,7 +26,7 @@ const DetailRow = ({ Icon, label, value, colorClass }) => {
 export default function OvernightOrderBottomWindow({ selectedOrder, onClose, sheetData }) {
     if (!selectedOrder) return null;
     const isOpen = logMarketStatus();
-    
+
     const userString = localStorage.getItem('loggedInUser');
     const userObject = userString ? JSON.parse(userString) : {};
     const userRole = userObject.role;
@@ -41,7 +41,7 @@ export default function OvernightOrderBottomWindow({ selectedOrder, onClose, she
 
     const {
         symbol, side, product, quantity: initialQty, price: initialPrice, jobbin_price,
-        security_Id, segment, _id: orderId, lots, stop_loss, target
+        instrument_token, segment, _id: orderId, lots, stop_loss, target
     } = selectedOrder;
 
     const lotSize = Number(selectedOrder.lot_size) || Number(selectedOrder.meta?.selectedStock?.lot_size) || 1;
@@ -129,7 +129,7 @@ export default function OvernightOrderBottomWindow({ selectedOrder, onClose, she
         try {
             // Validation & Fund Check
             if (intendedAction === 'Adjust') {
-                
+
                 const sl = Number(slPrice) || 0;
                 const tgt = Number(targetPrice) || 0;
 
@@ -161,7 +161,7 @@ export default function OvernightOrderBottomWindow({ selectedOrder, onClose, she
                 }
 
                 // --- 2. FUND CHECK FOR ADDING LOTS ---
-                if (parsedAddLots > 0) { 
+                if (parsedAddLots > 0) {
                     try {
                         const fundsData = await getFundsData();
                         if (!fundsData) throw new Error("Unable to fetch wallet balance.");
@@ -170,9 +170,9 @@ export default function OvernightOrderBottomWindow({ selectedOrder, onClose, she
                         const availableLimit = fundsData.overnight?.available_limit || 0;
 
                         if (requiredAmount > availableLimit) {
-                            setFeedback({ 
-                                type: 'error', 
-                                message: `Insufficient Overnight Funds! Required: ₹${requiredAmount.toFixed(2)}, Available: ₹${availableLimit.toFixed(2)}` 
+                            setFeedback({
+                                type: 'error',
+                                message: `Insufficient Overnight Funds! Required: ₹${requiredAmount.toFixed(2)}, Available: ₹${availableLimit.toFixed(2)}`
                             });
                             setSubmitting(false);
                             return;
@@ -190,7 +190,7 @@ export default function OvernightOrderBottomWindow({ selectedOrder, onClose, she
                 broker_id_str: brokerId,
                 customer_id_str: customerId,
                 order_id: orderId,
-                security_Id: security_Id,
+                instrument_token: instrument_token,
                 symbol: tradingsymbol,
                 side: orderSide,
                 product: product,
@@ -206,7 +206,7 @@ export default function OvernightOrderBottomWindow({ selectedOrder, onClose, she
                     lots: String(targetTotalLots),
                     quantity: Number(targetTotalQuantity),
                     price: Number(Number(computedAvg).toFixed(2)),
-                    order_status: null, 
+                    order_status: null,
                     stop_loss: slPrice ? Number(slPrice) : 0,
                     target: targetPrice ? Number(targetPrice) : 0,
                     meta: { from: 'ui_overnight_order_adjustment' }
@@ -242,19 +242,19 @@ export default function OvernightOrderBottomWindow({ selectedOrder, onClose, she
             });
 
             let body = null;
-            try { body = await res.json(); } catch (e) {}
+            try { body = await res.json(); } catch (e) { }
 
             if (!res.ok || (body && body.success === false)) {
                 throw new Error(body?.message || `Server error: ${res.status}`);
             }
 
             let successMsg = `${intendedAction} successful.`;
-            if(intendedAction === 'Adjust' && parsedAddLots === 0) successMsg = "Order Updated Successfully!";
+            if (intendedAction === 'Adjust' && parsedAddLots === 0) successMsg = "Order Updated Successfully!";
 
             setFeedback({ type: 'success', message: successMsg });
             try {
                 window.dispatchEvent(new CustomEvent('orders:changed', { detail: { order: body?.order } }));
-            } catch (e) {}
+            } catch (e) { }
 
             setTimeout(() => onClose(), 1000);
 
@@ -342,8 +342,8 @@ export default function OvernightOrderBottomWindow({ selectedOrder, onClose, she
                             <AlertCircle className="w-4 h-4 text-red-400" />
                             <div className="flex flex-col w-full">
                                 <span className="text-[10px] text-gray-400 uppercase">Stop Loss</span>
-                                <input 
-                                    type="number" 
+                                <input
+                                    type="number"
                                     value={slPrice}
                                     onChange={(e) => setSlPrice(e.target.value)}
                                     placeholder="0.00"
@@ -357,8 +357,8 @@ export default function OvernightOrderBottomWindow({ selectedOrder, onClose, she
                             <Target className="w-4 h-4 text-green-400" />
                             <div className="flex flex-col w-full">
                                 <span className="text-[10px] text-gray-400 uppercase">Target</span>
-                                <input 
-                                    type="number" 
+                                <input
+                                    type="number"
                                     value={targetPrice}
                                     onChange={(e) => setTargetPrice(e.target.value)}
                                     placeholder="0.00"
@@ -380,7 +380,7 @@ export default function OvernightOrderBottomWindow({ selectedOrder, onClose, she
                         {submitting && action === 'Adjust' ? 'UPDATING...' : (parsedAddLots > 0 ? 'BUY MORE...' : 'BUY MORE')}
                     </button>
 
-                    {userRole === 'broker'&& <button
+                    {userRole === 'broker' && <button
                         onClick={() => handleAction('Close')}
                         disabled={submitting}
                         className={`flex-1 p-3 rounded-lg text-white font-semibold transition bg-red-500 hover:bg-gray-700 ${submitting && action === 'Close' ? 'opacity-50' : ''}`}

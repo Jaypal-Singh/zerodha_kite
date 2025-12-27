@@ -8,7 +8,7 @@ const OrderSchema = new mongoose.Schema(
     customer_id_str: { type: String, index: true, required: true }, // your customer_id
 
     // --- What to trade ---
-    security_Id: { type: String, index: true, required: true }, // e.g. "NSE_FO|46470"
+    instrument_token: { type: String, index: true, required: true }, // Kite instrument token
     symbol: { type: String, required: true }, // e.g. "RELIANCE" / "NIFTY24NOV19500CE"
     segment: { type: String, require: true },
     // exchange: { type: String, required: true },                      // optional for now
@@ -27,7 +27,7 @@ const OrderSchema = new mongoose.Schema(
     quantity: { type: Number, required: true, min: 1 }, // abs qty = lots * lot_size
     lots: { type: Number, default: 0 }, // UI display only
     lot_size: { type: Number, default: 1 }, // snapshot from instrument
-    brokerage : {type : Number, default : 0.01},
+    brokerage: { type: Number, default: 0.01 },
     stop_loss: {
       type: Number,
       default: 0,
@@ -41,15 +41,15 @@ const OrderSchema = new mongoose.Schema(
     },
 
     // Ye field record karega ki order kyu close hua (SL Hit, Target Hit, ya Manual)
-    exit_reason: { 
-        type: String, 
-        default: null 
+    exit_reason: {
+      type: String,
+      default: null
     },
 
     // Agar pehle add nahi kiya tha, to ye bhi ensure kar lo (Fund logic ke liye)
     margin_blocked: {
-        type: Number,
-        default: 0
+      type: Number,
+      default: 0
     },
 
     // --- Execution summary ---

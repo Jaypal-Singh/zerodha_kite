@@ -217,7 +217,7 @@ function Summery({
     const product = productType === 'Intraday' ? 'MIS' : 'NRML';
     const lot_size = selectedStock?.lot_size || selectedStock?.lotSize || 1;
     const qty = Number(lots) * Number(lot_size);
-    
+
     // Calculate final price with jobbin adjustment using FRESH price
     const jobbinFactor = isBuy ? (1 + jobbinPct) : (1 - jobbinPct);
     const finalPrice = Number((priceForOrder * jobbinFactor).toFixed(4));
@@ -367,7 +367,7 @@ function Summery({
           className={`flex-1 p-2 rounded-lg font-semibold transition ${actionTab === 'Sell' ? 'bg-red-600 text-white shadow-lg' : 'bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
           onClick={() => setActionTab('Sell')}
         >
-           SELL
+          SELL
         </button>
       </div>
 

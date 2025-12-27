@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ShoppingCart, DollarSign, Hash, Zap, XCircle, Target, AlertCircle } from 'lucide-react';
+import { ShoppingCart, DollarSign, Hash, Zap, XCircle, Target, AlertCircle, Pencil, Check, X } from 'lucide-react';
 import { getFundsData } from '../../../Utils/fetchFund.jsx';
 import { logMarketStatus } from '../../../Utils/marketStatus.js';
 import { calculatePnLAndBrokerage } from '../../../Utils/calculateBrokerage.jsx';
@@ -24,7 +24,7 @@ export default function OpenOrderBottomWindow({ selectedOrder, onClose, sheetDat
 
     if (!selectedOrder) return null;
     const isOpen = logMarketStatus();
-    
+
     const userString = localStorage.getItem('loggedInUser');
     const userObject = userString ? JSON.parse(userString) : {};
     const userRole = userObject.role;
@@ -39,7 +39,7 @@ export default function OpenOrderBottomWindow({ selectedOrder, onClose, sheetDat
 
     const {
         symbol, side, product, quantity: initialQty, price: initialPrice, jobbin_price,
-        security_Id, segment, _id: orderId, lots, stop_loss, target, margin_blocked
+        instrument_token, segment, _id: orderId, lots, stop_loss, target, margin_blocked
     } = selectedOrder;
 
     const lotSize = Number(selectedOrder.lot_size) || Number(selectedOrder.meta?.selectedStock?.lot_size) || 1;
@@ -83,6 +83,10 @@ export default function OpenOrderBottomWindow({ selectedOrder, onClose, sheetDat
     const [feedback, setFeedback] = useState(null);
     const [orderStatus, setOrderStatus] = useState((selectedOrder.order_status || 'OPEN').toUpperCase());
 
+    // --- Price Edit State (Ported) ---
+    const [isEditingPrice, setIsEditingPrice] = useState(false);
+    const [editPriceInput, setEditPriceInput] = useState('');
+
     const apiBase = import.meta.env.VITE_REACT_APP_API_URL || "";
     const token = localStorage.getItem("token") || null;
     const activeContextString = localStorage.getItem('activeContext');
@@ -92,8 +96,8 @@ export default function OpenOrderBottomWindow({ selectedOrder, onClose, sheetDat
 
     useEffect(() => {
         setAddLotInput('');
-        setSlPrice(selectedOrder.stop_loss || ''); 
-        setTargetPrice(selectedOrder.target || ''); 
+        setSlPrice(selectedOrder.stop_loss || '');
+        setTargetPrice(selectedOrder.target || '');
         setFeedback(null);
         setOrderStatus((selectedOrder.order_status || 'OPEN').toUpperCase());
     }, [selectedOrder]);
@@ -101,7 +105,7 @@ export default function OpenOrderBottomWindow({ selectedOrder, onClose, sheetDat
     // --- ADD LOT CALCULATION ---
     const currentLots = Number(lots ?? 0);
     const parsedAddLots = Math.max(0, parseInt(String(addLotInput).trim() || '0', 10));
-    
+
     const targetTotalLots = currentLots + parsedAddLots;
     const targetTotalQuantity = targetTotalLots * lotSize;
 
@@ -115,6 +119,53 @@ export default function OpenOrderBottomWindow({ selectedOrder, onClose, sheetDat
     const displayComputedAvg = `₹${Number(computedAvg || 0).toFixed(2)}`;
 
 
+
+    // --- PRICE EDIT HANDLER (Ported) ---
+    const handlePriceSave = async () => {
+        if (!editPriceInput || isNaN(editPriceInput) || Number(editPriceInput) < 0) {
+            setFeedback({ type: 'error', message: 'Invalid Price' });
+            return;
+        }
+
+        setSubmitting(true);
+        try {
+            const endpoint = `${apiBase.replace(/\/$/, "")}/api/orders/updateOrder`;
+            const payload = {
+                broker_id_str: brokerId,
+                customer_id_str: customerId,
+                order_id: orderId,
+                price: Number(editPriceInput),
+                meta: { from: 'ui_open_order_window_edit_price' }
+            };
+
+            const res = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+                body: JSON.stringify(payload)
+            });
+
+            let body = null;
+            try { body = await res.json(); } catch (e) { }
+
+            if (!res.ok || (body && body.success === false)) {
+                throw new Error(body?.message || `Server error: ${res.status}`);
+            }
+
+            setFeedback({ type: 'success', message: 'Price Updated Successfully!' });
+            setIsEditingPrice(false);
+
+            try {
+                window.dispatchEvent(new CustomEvent('orders:changed', { detail: { order: body?.order } }));
+            } catch (e) { }
+
+        } catch (err) {
+            console.error("Price Edit Error:", err);
+            setFeedback({ type: 'error', message: `Failed: ${err.message}` });
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
     // --- MAIN ACTION HANDLER ---
     const handleAction = async (clickedAction, targetStatus) => {
         setSubmitting(true);
@@ -124,9 +175,9 @@ export default function OpenOrderBottomWindow({ selectedOrder, onClose, sheetDat
             // =========================================
             // 1. VALIDATION LOGIC (SL/Target/Lots)
             // =========================================
-            
+
             if (targetStatus === 'OPEN' && clickedAction === 'Adjust') {
-                
+
                 const sl = Number(slPrice) || 0;
                 const tgt = Number(targetPrice) || 0;
 
@@ -165,7 +216,7 @@ export default function OpenOrderBottomWindow({ selectedOrder, onClose, sheetDat
 
                         const requiredAmount = (parsedAddLots * lotSize) * currentPrice;
                         let availableLimit = 0;
-                        
+
                         if (productType === 'Intraday') {
                             const max = fundsData.intraday?.available_limit || 0;
                             const used = fundsData.intraday?.used_limit || 0;
@@ -175,9 +226,9 @@ export default function OpenOrderBottomWindow({ selectedOrder, onClose, sheetDat
                         }
 
                         if (requiredAmount > availableLimit) {
-                            setFeedback({ 
-                                type: 'error', 
-                                message: `Insufficient Funds! Required: ₹${requiredAmount.toFixed(2)}, Available: ₹${availableLimit.toFixed(2)}` 
+                            setFeedback({
+                                type: 'error',
+                                message: `Insufficient Funds! Required: ₹${requiredAmount.toFixed(2)}, Available: ₹${availableLimit.toFixed(2)}`
                             });
                             setSubmitting(false);
                             return;
@@ -193,7 +244,7 @@ export default function OpenOrderBottomWindow({ selectedOrder, onClose, sheetDat
             // =========================================
             // 2. API CALL PREPARATION
             // =========================================
-            
+
             const endpoint = `${apiBase.replace(/\/$/, "")}/api/orders/updateOrder`;
             const method = 'POST';
             let payload;
@@ -203,7 +254,7 @@ export default function OpenOrderBottomWindow({ selectedOrder, onClose, sheetDat
                     broker_id_str: brokerId,
                     customer_id_str: customerId,
                     order_id: orderId,
-                    security_Id: security_Id,
+                    instrument_token: instrument_token,
                     symbol: tradingsymbol,
                     side: orderSide,
                     product: 'MIS',
@@ -234,7 +285,7 @@ export default function OpenOrderBottomWindow({ selectedOrder, onClose, sheetDat
                     broker_id_str: brokerId,
                     customer_id_str: customerId,
                     order_id: orderId,
-                    security_Id: security_Id,
+                    instrument_token: instrument_token,
                     closed_ltp: Number(Number(closedLtp || 0).toFixed(4)),
                     closed_at: new Date().toISOString(),
                     symbol: tradingsymbol,
@@ -258,10 +309,10 @@ export default function OpenOrderBottomWindow({ selectedOrder, onClose, sheetDat
             }
 
             let successMsg = `${clickedAction} successful.`;
-            if(clickedAction === 'Adjust' && parsedAddLots === 0) successMsg = "Order Updated Successfully!";
-            
+            if (clickedAction === 'Adjust' && parsedAddLots === 0) successMsg = "Order Updated Successfully!";
+
             setFeedback({ type: 'success', message: successMsg });
-            
+
             try {
                 window.dispatchEvent(new CustomEvent('orders:changed', { detail: { order: body?.order } }));
             } catch (e) { }
@@ -352,8 +403,8 @@ export default function OpenOrderBottomWindow({ selectedOrder, onClose, sheetDat
                             <AlertCircle className="w-4 h-4 text-red-400" />
                             <div className="flex flex-col w-full">
                                 <span className="text-[10px] text-gray-400 uppercase">Stop Loss</span>
-                                <input 
-                                    type="number" 
+                                <input
+                                    type="number"
                                     value={slPrice}
                                     onChange={(e) => setSlPrice(e.target.value)}
                                     placeholder="0.00"
@@ -366,8 +417,8 @@ export default function OpenOrderBottomWindow({ selectedOrder, onClose, sheetDat
                             <Target className="w-4 h-4 text-green-400" />
                             <div className="flex flex-col w-full">
                                 <span className="text-[10px] text-gray-400 uppercase">Target</span>
-                                <input 
-                                    type="number" 
+                                <input
+                                    type="number"
                                     value={targetPrice}
                                     onChange={(e) => setTargetPrice(e.target.value)}
                                     placeholder="0.00"
@@ -381,8 +432,39 @@ export default function OpenOrderBottomWindow({ selectedOrder, onClose, sheetDat
                         <div className="flex items-center">
                             <Hash className="w-5 h-5 text-gray-400 mr-2" />
                             <div className="w-75 p-2 bg-[#2A314A] text-white rounded-md transition flex items-center justify-between">
-                                <span className="text-sm">New Avg. Price</span>
-                                <span className="font-medium">{displayComputedAvg}</span>
+                                <div className="flex items-center space-x-2">
+                                    <span className="text-sm">New Avg. Price</span>
+                                </div>
+
+                                {isEditingPrice ? (
+                                    <div className="flex items-center space-x-2">
+                                        <input
+                                            type="number"
+                                            value={editPriceInput}
+                                            onChange={(e) => setEditPriceInput(e.target.value)}
+                                            className="w-24 bg-[#1F2028] text-white text-sm px-2 py-1 rounded border border-gray-600 focus:outline-none"
+                                        />
+                                        <button onClick={handlePriceSave} disabled={submitting} className="p-1 rounded bg-green-500/20 text-green-400 hover:bg-green-500/40">
+                                            <Check className="w-4 h-4" />
+                                        </button>
+                                        <button onClick={() => setIsEditingPrice(false)} disabled={submitting} className="p-1 rounded bg-red-500/20 text-red-400 hover:bg-red-500/40">
+                                            <X className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center">
+                                        <span className="font-medium mr-2">{displayComputedAvg}</span>
+                                        <button
+                                            onClick={() => {
+                                                setEditPriceInput(Number(computedAvg).toFixed(2));
+                                                setIsEditingPrice(true);
+                                            }}
+                                            className="text-gray-400 hover:text-white"
+                                        >
+                                            <Pencil className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}

@@ -8,7 +8,7 @@ import OptionStrikeBottomWindow from './OptionStrikeBottomWindow';
 const STRIKE_OPTIONS = [
     { label: '6 Strikes', value: 6 },
     { label: '12 Strikes', value: 12 },
-    
+
 ];
 
 // Auto-refresh interval (in ms) - 5 seconds for near real-time feel
@@ -18,20 +18,20 @@ const OptionChainFullscreen = ({ selectedStock, sheetData, onClose }) => {
     const [selectedExpiry, setSelectedExpiry] = useState(null);
     const [strikeCount, setStrikeCount] = useState(12); // Default to 12 strikes
     const [lastUpdateTime, setLastUpdateTime] = useState(null);
-    
+
     // State for selected strike bottom window
     const [selectedStrike, setSelectedStrike] = useState(null); // { strike, type: 'CE'|'PE', data }
-    
-    const { 
-        chainData, 
-        spotPrice, 
-        expiries, 
-        loading, 
+
+    const {
+        chainData,
+        spotPrice,
+        expiries,
+        loading,
         error,
-        refetch 
+        refetch
     } = useOptionChain({
+        name: selectedStock?.name,
         segment: selectedStock?.segment,
-        securityId: selectedStock?.securityId,
         expiry: selectedExpiry
     });
 
@@ -76,7 +76,7 @@ const OptionChainFullscreen = ({ selectedStock, sheetData, onClose }) => {
         // Find ATM strike (closest to spot price)
         let closestStrike = chainData[0]?.strike;
         let minDiff = Math.abs(chainData[0]?.strike - currentPrice);
-        
+
         chainData.forEach(row => {
             const diff = Math.abs(row.strike - currentPrice);
             if (diff < minDiff) {
@@ -87,17 +87,17 @@ const OptionChainFullscreen = ({ selectedStock, sheetData, onClose }) => {
 
         // Find index of ATM strike
         const atmIndex = chainData.findIndex(row => row.strike === closestStrike);
-        
+
         // Calculate strikes above and below based on selected count
         // strikeCount is total, so divide by 2 for each side
         const strikesPerSide = Math.floor((strikeCount - 1) / 2);
         let strikesAbove = strikesPerSide;
         let strikesBelow = strikesPerSide;
-        
+
         // Adjust if we don't have enough strikes on one side
         const availableAbove = atmIndex;
         const availableBelow = chainData.length - atmIndex - 1;
-        
+
         if (availableAbove < strikesAbove) {
             strikesAbove = availableAbove;
             strikesBelow = Math.min(availableBelow, strikeCount - strikesAbove - 1);
@@ -110,19 +110,19 @@ const OptionChainFullscreen = ({ selectedStock, sheetData, onClose }) => {
         // Slice the data
         const startIndex = Math.max(0, atmIndex - strikesAbove);
         const endIndex = Math.min(chainData.length, atmIndex + strikesBelow + 1);
-        
+
         return {
             filteredChain: chainData.slice(startIndex, endIndex),
             atmStrike: closestStrike
         };
     }, [chainData, currentPrice, strikeCount]);
-    
+
     // Format expiry date
     const formatExpiry = (dateStr) => {
         if (!dateStr) return 'N/A';
         const date = new Date(dateStr);
-        return date.toLocaleDateString('en-US', { 
-            day: 'numeric', 
+        return date.toLocaleDateString('en-US', {
+            day: 'numeric',
             month: 'short',
             year: 'numeric'
         });
@@ -144,8 +144,8 @@ const OptionChainFullscreen = ({ selectedStock, sheetData, onClose }) => {
             </div>
         );
     }
- 
- 
+
+
     // Error state
     if (error) {
         return (
@@ -154,13 +154,13 @@ const OptionChainFullscreen = ({ selectedStock, sheetData, onClose }) => {
                     <AlertCircle className="w-10 h-10 inline text-red-400 mb-4" />
                     <p className="text-red-400 mb-4">{error}</p>
                     <div className="flex gap-3 justify-center">
-                        <button 
+                        <button
                             onClick={refetch}
                             className="px-5 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition flex items-center gap-2"
                         >
                             <RefreshCw className="w-4 h-4" /> Retry
                         </button>
-                        <button 
+                        <button
                             onClick={onClose}
                             className="px-5 py-2 bg-[var(--bg-secondary)] text-[var(--text-primary)] rounded-lg hover:bg-[var(--bg-hover)] transition"
                         >
@@ -180,7 +180,7 @@ const OptionChainFullscreen = ({ selectedStock, sheetData, onClose }) => {
                     <TrendingDown className="w-10 h-10 inline mb-4 opacity-50 text-[var(--text-secondary)]" />
                     <p className="text-[var(--text-secondary)] mb-2">No option chain data available</p>
                     <p className="text-[var(--text-muted)] text-sm mb-4">This instrument may not support options trading</p>
-                    <button 
+                    <button
                         onClick={onClose}
                         className="px-5 py-2 bg-[var(--bg-secondary)] text-[var(--text-primary)] rounded-lg hover:bg-[var(--bg-hover)] transition"
                     >
@@ -193,7 +193,7 @@ const OptionChainFullscreen = ({ selectedStock, sheetData, onClose }) => {
 
     return (
         <div className="fixed inset-0 bg-[var(--bg-primary)] z-[100] flex flex-col text-[var(--text-primary)]">
-            
+
             {/* Header Bar - Fixed - Mobile Optimized */}
             <div className="bg-[var(--bg-card)] border-b border-[var(--border-color)] px-3 py-2 flex-shrink-0">
                 {/* Top Row: Title + Close */}
@@ -208,14 +208,14 @@ const OptionChainFullscreen = ({ selectedStock, sheetData, onClose }) => {
                         </span>
                     </div>
                     <div className="flex items-center gap-1 flex-shrink-0">
-                        <button 
+                        <button
                             onClick={() => { refetch(); setLastUpdateTime(new Date()); }}
                             className="p-1.5 hover:bg-[var(--bg-hover)] rounded-lg transition"
                             title="Refresh"
                         >
                             <RefreshCw className="w-4 h-4 text-[var(--text-secondary)]" />
                         </button>
-                        <button 
+                        <button
                             onClick={onClose}
                             className="p-1.5 hover:bg-[var(--bg-hover)] rounded-lg transition"
                             title="Close"
@@ -224,7 +224,7 @@ const OptionChainFullscreen = ({ selectedStock, sheetData, onClose }) => {
                         </button>
                     </div>
                 </div>
-                
+
                 {/* Bottom Row: Spot + Filters */}
                 <div className="flex items-center justify-between gap-2">
                     {/* Spot Price */}
@@ -238,7 +238,7 @@ const OptionChainFullscreen = ({ selectedStock, sheetData, onClose }) => {
                     {/* Filters Row */}
                     <div className="flex items-center gap-1.5">
                         {/* Strike Count */}
-                        <select 
+                        <select
                             value={strikeCount}
                             onChange={(e) => setStrikeCount(Number(e.target.value))}
                             className="bg-[var(--bg-secondary)] text-[var(--text-primary)] px-2 py-1 w-30 rounded border border-[var(--border-color)] focus:outline-none text-xs w-14"
@@ -252,8 +252,8 @@ const OptionChainFullscreen = ({ selectedStock, sheetData, onClose }) => {
 
                         {/* Expiry */}
                         {expiries && expiries.length > 0 && (
-                            <select 
-                                value={selectedExpiry || expiries[0]} 
+                            <select
+                                value={selectedExpiry || expiries[0]}
                                 onChange={(e) => setSelectedExpiry(e.target.value)}
                                 className="bg-[var(--bg-secondary)] text-[var(--text-primary)] px-2 py-1 w-30 rounded border border-[var(--border-color)] focus:outline-none text-xs max-w-[90px]"
                             >
@@ -273,7 +273,7 @@ const OptionChainFullscreen = ({ selectedStock, sheetData, onClose }) => {
                 <div className="max-w-2xl mx-auto">
                     {/* Table Container */}
                     <div className="bg-[var(--bg-card)] rounded-xl border border-[var(--border-color)] shadow-2xl overflow-hidden">
-                        
+
                         {/* Table Header - Separate from body */}
                         <div className="bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">
                             <div className="grid grid-cols-3">
@@ -288,12 +288,12 @@ const OptionChainFullscreen = ({ selectedStock, sheetData, onClose }) => {
                                 </div>
                             </div>
                         </div>
-                        
+
                         {/* Table Body */}
                         <div>
                             {filteredChain.map((row) => {
                                 const isATM = row.strike === atmStrike;
-                                
+
                                 // Handler for clicking on Call LTP
                                 const handleCallClick = () => {
                                     if (row.call?.ltp) {
@@ -306,7 +306,7 @@ const OptionChainFullscreen = ({ selectedStock, sheetData, onClose }) => {
                                         });
                                     }
                                 };
-                                
+
                                 // Handler for clicking on Put LTP
                                 const handlePutClick = () => {
                                     if (row.put?.ltp) {
@@ -319,20 +319,20 @@ const OptionChainFullscreen = ({ selectedStock, sheetData, onClose }) => {
                                         });
                                     }
                                 };
-                                
+
                                 return (
-                                    <div 
-                                        key={row.strike} 
+                                    <div
+                                        key={row.strike}
                                         className={`
                                             grid grid-cols-3 border-b border-[var(--border-color)] transition-colors
-                                            ${isATM 
-                                                ? 'bg-yellow-500/10' 
+                                            ${isATM
+                                                ? 'bg-yellow-500/10'
                                                 : 'hover:bg-[var(--bg-hover)]'
                                             }
                                         `}
                                     >
                                         {/* Call LTP - Clickable */}
-                                        <div 
+                                        <div
                                             className={`py-3 px-6 text-center cursor-pointer hover:bg-green-500/20 active:bg-green-500/30 transition-colors ${row.call?.ltp ? '' : 'opacity-50 cursor-not-allowed'}`}
                                             onClick={handleCallClick}
                                         >
@@ -340,20 +340,20 @@ const OptionChainFullscreen = ({ selectedStock, sheetData, onClose }) => {
                                                 {formatLTP(row.call?.ltp)}
                                             </span>
                                         </div>
-                                        
+
                                         {/* Strike Price */}
                                         <div className={`
                                             py-3 px-6 text-center font-bold text-lg border-x border-[var(--border-color)]
-                                            ${isATM 
-                                                ? 'bg-yellow-500/20 text-yellow-300' 
+                                            ${isATM
+                                                ? 'bg-yellow-500/20 text-yellow-300'
                                                 : 'bg-[var(--bg-secondary)] text-[var(--text-primary)]'
                                             }
                                         `}>
                                             {row.strike}
                                         </div>
-                                        
+
                                         {/* Put LTP - Clickable */}
-                                        <div 
+                                        <div
                                             className={`py-3 px-6 text-center cursor-pointer hover:bg-red-500/20 active:bg-red-500/30 transition-colors ${row.put?.ltp ? '' : 'opacity-50 cursor-not-allowed'}`}
                                             onClick={handlePutClick}
                                         >
@@ -375,14 +375,14 @@ const OptionChainFullscreen = ({ selectedStock, sheetData, onClose }) => {
                             </span>
                         </div>
                     </div>
-                    
+
                     {/* Tap Hint */}
                     <p className="text-center text-[var(--text-muted)] text-xs mt-4">
                         Tap on any LTP price to trade
                     </p>
                 </div>
             </div>
-            
+
             {/* Option Strike Bottom Window */}
             <OptionStrikeBottomWindow
                 isOpen={selectedStrike !== null}

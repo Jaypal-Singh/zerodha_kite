@@ -2,18 +2,7 @@
 import React, { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import HoldOrderBottomWindow from "./holdOrderBottomWindow.jsx";
 import { calculatePnLAndBrokerage } from "../../../Utils/calculateBrokerage.jsx";
-
-// --- MOCK FUNCTION START (agar context ready nahi hai to) ---
-const MOCK_TICKS = new Map();
-const useMarketData = () => {
-  return {
-    ticks: MOCK_TICKS,
-    subscribe: async () => { },
-    unsubscribe: async () => { },
-    isConnected: true,
-  };
-};
-// --- MOCK FUNCTION END ---
+import { useMarketData } from "../../../contexts/MarketDataContext.jsx";
 
 const money = (n) => `₹${Number(n ?? 0).toFixed(2)}`;
 
@@ -47,19 +36,7 @@ export default function HoldOrder() {
   const apiBase = import.meta.env.VITE_REACT_APP_API_URL || "";
   const token = localStorage.getItem("token") || null;
 
-  const segmentStringToNumberMap = useMemo(
-    () => ({
-      NSE_EQ: 1,
-      NSE_FNO: 2,
-      MCX_COMM: 5,
-      BSE_EQ: 4,
-      NSE_INDEX: 0,
-      IDX_I: 0,
-      BSE_INDEX: 0,
-      BSE_FNO: 8,
-    }),
-    []
-  );
+  // Segment map no longer needed - using instrument_token directly
 
   const handleOrderSelect = (orderData) => {
     setSelectedOrderData(orderData);
@@ -139,13 +116,12 @@ export default function HoldOrder() {
 
     (async () => {
       try {
+        // Use instrument_token for Kite WebSocket subscription
         const items = instrumentData
           .map((item) => {
-            const segment = item.segment ?? item.exchange ?? null;
-            const rawSecurityId =
-              item.securityId ?? item.security_Id ?? item.id ?? null;
-            if (!segment || rawSecurityId == null) return null;
-            return { segment, securityId: String(rawSecurityId) };
+            const token = item.instrument_token;
+            if (!token) return null;
+            return { instrument_token: String(token) };
           })
           .filter(Boolean);
 
@@ -203,14 +179,12 @@ export default function HoldOrder() {
     })();
 
     return () => {
+      // Unsubscribe using instrument_token
       const items = instrumentData
         .map((item) => ({
-          segment: item.segment ?? item.exchange ?? null,
-          securityId: String(
-            item.securityId ?? item.security_Id ?? item.id ?? null
-          ),
+          instrument_token: String(item.instrument_token)
         }))
-        .filter((i) => i.segment && i.securityId);
+        .filter((i) => i.instrument_token);
 
       if (items.length > 0) {
         const fn = unsubscribeRef.current || unsubscribe;
@@ -232,7 +206,7 @@ export default function HoldOrder() {
   useEffect(() => {
     let animationFrameId;
     let lastUpdate = 0;
-    const THROTTLE_MS = 200; // 5 FPS is sufficient for Holdings
+    const THROTTLE_MS = 200;
 
     const updateLoop = (timestamp) => {
       if (timestamp - lastUpdate < THROTTLE_MS) {
@@ -251,9 +225,8 @@ export default function HoldOrder() {
       let hasUpdates = false;
 
       currentData.forEach(inst => {
-        const securityKey = String(inst.security_Id ?? inst.securityId ?? inst.id ?? "");
-        const numericSegment = segmentStringToNumberMap[inst.segment];
-        const tickKey = `${numericSegment}-${securityKey}`;
+        // Use instrument_token directly as key (Kite format)
+        const tickKey = String(inst.instrument_token);
         const tick = ticksMap.get(tickKey);
 
         if (tick) {
@@ -263,13 +236,7 @@ export default function HoldOrder() {
       });
 
       if (hasUpdates) {
-        setLiveTicks(prev => {
-          // Simple optimization: if no keys changed, don't update? 
-          // Actually, prices always change. Just set it.
-          // To avoid excessive object creation, we could diff?
-          // For now, just setting new object is safer for correctness.
-          return newTicks;
-        });
+        setLiveTicks(prev => newTicks);
         lastUpdate = timestamp;
       }
 
@@ -278,7 +245,7 @@ export default function HoldOrder() {
 
     animationFrameId = requestAnimationFrame(updateLoop);
     return () => cancelAnimationFrame(animationFrameId);
-  }, [segmentStringToNumberMap]);
+  }, []);
 
   // ---- MERGE instruments + snapshots + liveTicks ----
   const displayList = useMemo(() => {
@@ -287,35 +254,27 @@ export default function HoldOrder() {
     }
 
     return instrumentData.map((inst) => {
-      const securityKey = String(inst.security_Id ?? inst.securityId ?? inst.id ?? "");
+      // Use instrument_token as the key
+      const tickKey = String(inst.instrument_token);
       let snapshot = null;
 
       if (orders && typeof orders === "object") {
-        snapshot =
-          orders[securityKey] ??
-          orders[String(inst.securityId ?? "")] ??
-          null;
-        if (!snapshot && inst.segment) {
-          snapshot = orders[`${inst.segment}|${securityKey}`] ?? null;
-        }
+        snapshot = orders[tickKey] ?? null;
       }
 
-      const numericSegment = segmentStringToNumberMap[inst.segment];
-      const tickKey = `${numericSegment}-${securityKey}`;
       const tick = liveTicks[tickKey] || {};
-
       const combined = { ...snapshot, ...tick };
       return { ...inst, snapshot: combined };
     });
-  }, [instrumentData, orders, liveTicks, segmentStringToNumberMap, list]);
+  }, [instrumentData, orders, liveTicks, list]);
 
   const selectedOrderMarketData = useMemo(() => {
     if (!selectedOrderData) return {};
     const foundItem = displayList.find(
       (item) =>
         item._id === selectedOrderData._id ||
-        (item.security_Id &&
-          item.security_Id === selectedOrderData.security_Id)
+        (item.instrument_token &&
+          item.instrument_token === selectedOrderData.instrument_token)
     );
     return foundItem?.snapshot ?? {};
   }, [selectedOrderData, displayList]);
@@ -388,7 +347,7 @@ export default function HoldOrder() {
               key={
                 data._id ||
                 data.id ||
-                `${data.segment}-${data.security_Id}-${idx}`
+                `${data.segment}-${data.instrument_token}-${idx}`
               }
               className="relative bg-[#121a2b] rounded-lg p-3 border border-white/10 hover:bg-[#222a41] transition cursor-pointer"
               onClick={() => handleOrderSelect(data)}

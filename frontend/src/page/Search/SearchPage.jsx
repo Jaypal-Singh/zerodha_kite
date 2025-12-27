@@ -136,21 +136,27 @@ function SearchPage() {
   // Format instruments using Kite schema
   const formatInstruments = (instruments) => {
     if (!Array.isArray(instruments)) return [];
-    return instruments.map((one) => ({
-      _id: one._id,
-      id: String(one.instrument_token),
-      instrument_token: String(one.instrument_token),
-      tradingSymbol: one.tradingsymbol || one.name || "Unknown",
-      name: one.name || one.tradingsymbol || "Unknown",
-      exchange: getExchangeDisplayName(one.segment, one.instrument_type),
-      segment: one.segment,
-      instrument_type: one.instrument_type || null,
-      expiry: one.expiry || null,
-      strike: one.strike || null,
-      lot_size: one.lot_size ?? 1,
-      tick_size: one.tick_size ?? 0.05,
-      canon_key: one.canon_key,
-    }));
+
+    // Segments to exclude from search results
+    const EXCLUDED_SEGMENTS = ['INDICES', 'NSE', 'BSE', 'CDS-FUT', 'CDS-OPT'];
+
+    return instruments
+      .filter(one => !EXCLUDED_SEGMENTS.includes(one.segment))
+      .map((one) => ({
+        _id: one._id,
+        id: String(one.instrument_token),
+        instrument_token: String(one.instrument_token),
+        tradingSymbol: one.tradingsymbol || one.name || "Unknown",
+        name: one.name || one.tradingsymbol || "Unknown",
+        exchange: getExchangeDisplayName(one.segment, one.instrument_type),
+        segment: one.segment,
+        instrument_type: one.instrument_type || null,
+        expiry: one.expiry || null,
+        strike: one.strike || null,
+        lot_size: one.lot_size ?? 1,
+        tick_size: one.tick_size ?? 0.05,
+        canon_key: one.canon_key,
+      }));
   };
 
   // Debounced Search Logic with AbortController
@@ -353,9 +359,12 @@ function SearchPage() {
         // *** PRE-SUBSCRIBE: Start receiving data BEFORE user navigates to watchlist ***
         // This gives a head start so data is already flowing when they arrive
         try {
-          const subItem = { segment: stock.segment, securityId: stock.securityId };
-          subscribe([subItem], 'quote');
-          console.log(`[SearchPage] Pre-subscribed ${stock.tradingSymbol} to quote feed`);
+          // Use instrument_token for Kite
+          if (stock.instrument_token) {
+            const subItem = { instrument_token: stock.instrument_token };
+            subscribe([subItem], 'quote');
+            console.log(`[SearchPage] Pre-subscribed ${stock.tradingSymbol} to quote feed`);
+          }
         } catch (subErr) {
           console.warn("[SearchPage] Pre-subscribe failed:", subErr);
           // Non-blocking - order will still work, just might have slight delay

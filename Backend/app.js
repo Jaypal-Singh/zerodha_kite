@@ -29,14 +29,14 @@ export function createApp() {
   const defaultOrigins = [
     "http://localhost:5173",                   // Local Vite frontend
     "http://127.0.0.1:5173",                   // Local IP
-    "https://devakibrokerage.in",  // Render frontend (production)
+    "https://kite.wolfkrypt.me",  // Render frontend (production)
   ];
 
   // If you have extra origins in your config file, we add them too
   const configOrigins = (config.origin || "")
     .split(",")
     .map(s => s.trim())
-    .filter(Boolean);                             
+    .filter(Boolean);
 
   const corsOpts = {
     origin: [...defaultOrigins, ...configOrigins], // Merge lists
@@ -45,7 +45,7 @@ export function createApp() {
     allowedHeaders: ["Content-Type", "Authorization"],
     optionsSuccessStatus: 204,
   };
-  
+
   app.use(cors(corsOpts));
   // -------------------------------
 
@@ -103,12 +103,12 @@ export function createApp() {
   app.use("/api/registration", registrationRoute); // Public - no auth required
 
   // Version endpoint for cache busting - INCREMENT VERSION ON EVERY DEPLOYMENT
-  const APP_VERSION = '1.0.1';
+  const APP_VERSION = '1.8.3';
   app.get("/api/version", (_req, res) => {
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.set('Pragma', 'no-cache');
     res.set('Expires', '0');
-    res.json({ 
+    res.json({
       version: APP_VERSION,
       serverTime: new Date().toISOString()
     });

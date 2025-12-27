@@ -17,9 +17,9 @@ export const activeTriggers = new Map();
 export const loadOpenOrders = async () => {
     try {
         console.log("🔄 [OrderManager] Loading active triggers...");
-        
+
         // LOGIC: Status 'CLOSED' nahi hona chahiye + SL ya Target set hona chahiye
-        const activeOrders = await Order.find({ 
+        const activeOrders = await Order.find({
             order_status: { $ne: 'CLOSED' }, // Means: OPEN, HOLD, or null
             $or: [
                 { stop_loss: { $exists: true, $ne: null, $gt: 0 } },
@@ -27,7 +27,7 @@ export const loadOpenOrders = async () => {
             ]
         });
 
-        activeTriggers.clear(); 
+        activeTriggers.clear();
 
         activeOrders.forEach(order => {
             addToWatchlist(order);
@@ -49,7 +49,8 @@ export const addToWatchlist = (order) => {
     // 1. Agar Order CLOSED hai to ignore karo
     if (order.order_status === 'CLOSED') return;
 
-    const token = String(order.security_Id);
+    // Use instrument_token for Kite (fallback to security_Id for backward compatibility)
+    const token = String(order.instrument_token || order.security_Id);
     const sl = Number(order.stop_loss) || 0;
     const target = Number(order.target) || 0;
 
@@ -67,7 +68,7 @@ export const addToWatchlist = (order) => {
         sl: sl,
         target: target,
         // Status isliye rakh rahe hain taaki debug kar sakein (Open/Hold/null)
-        status: order.order_status 
+        status: order.order_status
     };
 
     activeTriggers.get(token).push(triggerData);
@@ -81,14 +82,15 @@ export const addToWatchlist = (order) => {
  * =========================================================
  */
 export const updateTriggerInWatchlist = (order) => {
-    const token = String(order.security_Id);
+    // Use instrument_token for Kite (fallback to security_Id for backward compatibility)
+    const token = String(order.instrument_token || order.security_Id);
     const orderIdStr = String(order._id);
 
     // Step 1: Purana entry hatao (taaki duplicate na ho)
     if (activeTriggers.has(token)) {
         const currentList = activeTriggers.get(token);
         const filteredList = currentList.filter(o => o.orderId !== orderIdStr);
-        
+
         if (filteredList.length === 0) {
             activeTriggers.delete(token);
         } else {
@@ -128,7 +130,7 @@ const executeExit = async (orderData, exitPrice, reason) => {
         // Hum Fund ko nahi chhed rahe, bas Order Close kar rahe hain.
         // Fund logic agar future me chahiye to 'OrdersController' handle karega alag se
         // ya fir user manual refresh karega tab sync hoga.
-        
+
         await Order.findByIdAndUpdate(orderId, {
             $set: {
                 order_status: "CLOSED",
@@ -152,12 +154,12 @@ export const onMarketTick = async ({ token, ltp }) => {
     const orders = activeTriggers.get(String(token));
     const currentLtp = Number(ltp);
 
-    if (!currentLtp || currentLtp <= 0) return; 
+    if (!currentLtp || currentLtp <= 0) return;
 
     // 2. Loop through orders using standard for-loop (Fastest)
     for (let i = 0; i < orders.length; i++) {
         const order = orders[i];
-        
+
         let hit = false;
         let hitReason = "";
         let hitPrice = 0;
@@ -169,14 +171,14 @@ export const onMarketTick = async ({ token, ltp }) => {
                 hit = true;
                 hitReason = "STOPLOSS_HIT";
                 hitPrice = order.sl;
-            } 
+            }
             // Target Hit: Price utha >= Target
             else if (order.target > 0 && currentLtp >= order.target) {
                 hit = true;
                 hitReason = "TARGET_HIT";
-                hitPrice  = order.target;
+                hitPrice = order.target;
             }
-        } 
+        }
         // SELL Logic
         else {
             // SL Hit: Price utha >= SL (Shorting me loss upar jane pe hota hai)
@@ -184,7 +186,7 @@ export const onMarketTick = async ({ token, ltp }) => {
                 hit = true;
                 hitReason = "STOPLOSS_HIT";
                 hitPrice = order.sl
-            } 
+            }
             // Target Hit: Price gira <= Target
             else if (order.target > 0 && currentLtp <= order.target) {
                 hit = true;

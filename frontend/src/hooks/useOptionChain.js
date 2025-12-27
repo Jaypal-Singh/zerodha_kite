@@ -6,10 +6,10 @@ const apiBase = import.meta.env.VITE_REACT_APP_API_URL || 'http://localhost:8080
 
 /**
  * Custom hook to fetch and manage option chain data with live WebSocket updates
- * @param {Object} params - { segment, securityId, expiry }
+ * @param {Object} params - { name, segment, expiry }
  * @returns {Object} - { chainData, loading, error, spotPrice, expiries, refetch }
  */
-export function useOptionChain({ segment, securityId, expiry }) {
+export function useOptionChain({ name, segment, expiry }) {
   const [chainData, setChainData] = useState(null);
   const [spotPrice, setSpotPrice] = useState(null);
   const [expiries, setExpiries] = useState([]);
@@ -18,27 +18,27 @@ export function useOptionChain({ segment, securityId, expiry }) {
 
   const { ticksRef, subscribe, unsubscribe, isConnected } = useMarketData();
 
-  // Track subscribed option securityIds for cleanup
-  const subscribedSecurityIdsRef = useRef([]);
+  // Track subscribed option tokens for cleanup
+  const subscribedTokensRef = useRef([]);
   const lastFetchParamsRef = useRef(null);
 
-  // Store securityId to chain position mapping for tick updates
-  const securityIdMapRef = useRef(new Map());
+  // Store instrument_token to chain position mapping for tick updates
+  const tokenMapRef = useRef(new Map());
 
   /**
    * Fetch option chain data from backend
    */
   const fetchOptionChain = useCallback(async () => {
-    if (!segment || !securityId) {
-      console.warn('[useOptionChain] Missing required params:', { segment, securityId });
+    if (!name) {
+      console.warn('[useOptionChain] Missing required params: name');
       return;
     }
 
-    const symbol = `${segment}|${securityId}`;
-    const params = new URLSearchParams({ symbol });
+    const params = new URLSearchParams({ name });
+    if (segment) params.append('segment', segment);
     if (expiry) params.append('expiry', expiry);
 
-    const paramsKey = `${segment}|${securityId}|${expiry || 'default'}`;
+    const paramsKey = `${name}|${segment || 'auto'}|${expiry || 'nearest'}`;
 
     // Avoid duplicate fetches
     if (lastFetchParamsRef.current === paramsKey) {
@@ -48,7 +48,7 @@ export function useOptionChain({ segment, securityId, expiry }) {
 
     setLoading(true);
     setError(null);
-    console.log('[useOptionChain] Fetching option chain:', { symbol, expiry });
+    console.log('[useOptionChain] Fetching option chain:', { name, segment, expiry });
 
     try {
       const token = localStorage.getItem('token');
@@ -85,18 +85,18 @@ export function useOptionChain({ segment, securityId, expiry }) {
     } finally {
       setLoading(false);
     }
-  }, [segment, securityId, expiry]);
+  }, [name, segment, expiry]);
 
   /**
    * Fetch available expiry dates for the underlying
    */
   const fetchExpiries = useCallback(async () => {
-    if (!segment || !securityId) return;
+    if (!name) return;
 
-    const symbol = `${segment}|${securityId}`;
-    const params = new URLSearchParams({ symbol });
+    const params = new URLSearchParams({ name });
+    if (segment) params.append('segment', segment);
 
-    console.log('[useOptionChain] Fetching expiries for:', symbol);
+    console.log('[useOptionChain] Fetching expiries for:', name);
 
     try {
       const token = localStorage.getItem('token');
@@ -120,7 +120,7 @@ export function useOptionChain({ segment, securityId, expiry }) {
     } catch (err) {
       console.warn('[useOptionChain] Expiries fetch error:', err);
     }
-  }, [segment, securityId]);
+  }, [name, segment]);
 
   /**
    * Subscribe to live ticker data for all option strikes in the chain
@@ -132,32 +132,32 @@ export function useOptionChain({ segment, securityId, expiry }) {
       return;
     }
 
-    // Build subscription list and securityId mapping
+    // Build subscription list and token mapping
     const subscriptionList = [];
-    const newSecurityIdMap = new Map();
+    const newTokenMap = new Map();
 
     chainArray.forEach((row, index) => {
-      // Subscribe to CE (call) option if has securityId
-      if (row.call?.securityId) {
+      // Subscribe to CE (call) option if has instrument_token
+      if (row.call?.instrument_token) {
+        const token = String(row.call.instrument_token);
         subscriptionList.push({
-          segment: 'NSE_FNO',
-          securityId: String(row.call.securityId)
+          instrument_token: token
         });
-        // Map securityId to chain position for tick updates
-        newSecurityIdMap.set(String(row.call.securityId), {
+        // Map token to chain position for tick updates
+        newTokenMap.set(token, {
           index,
           type: 'call',
           strike: row.strike
         });
       }
 
-      // Subscribe to PE (put) option if has securityId
-      if (row.put?.securityId) {
+      // Subscribe to PE (put) option if has instrument_token
+      if (row.put?.instrument_token) {
+        const token = String(row.put.instrument_token);
         subscriptionList.push({
-          segment: 'NSE_FNO',
-          securityId: String(row.put.securityId)
+          instrument_token: token
         });
-        newSecurityIdMap.set(String(row.put.securityId), {
+        newTokenMap.set(token, {
           index,
           type: 'put',
           strike: row.strike
@@ -166,15 +166,15 @@ export function useOptionChain({ segment, securityId, expiry }) {
     });
 
     if (subscriptionList.length === 0) {
-      console.warn('[useOptionChain] No securityIds found in chain data');
+      console.warn('[useOptionChain] No instrument_tokens found in chain data');
       return;
     }
 
     // Store mapping for tick updates
-    securityIdMapRef.current = newSecurityIdMap;
+    tokenMapRef.current = newTokenMap;
 
     // Store for cleanup
-    subscribedSecurityIdsRef.current = subscriptionList;
+    subscribedTokensRef.current = subscriptionList;
 
     console.log(`[useOptionChain] Subscribing to ${subscriptionList.length} option contracts (ticker mode)`);
 
@@ -187,15 +187,15 @@ export function useOptionChain({ segment, securityId, expiry }) {
    * Unsubscribe from option strikes
    */
   const unsubscribeFromOptionStrikes = useCallback(() => {
-    if (subscribedSecurityIdsRef.current.length === 0) return;
+    if (subscribedTokensRef.current.length === 0) return;
 
-    console.log('[useOptionChain] Unsubscribing from', subscribedSecurityIdsRef.current.length, 'option contracts');
+    console.log('[useOptionChain] Unsubscribing from', subscribedTokensRef.current.length, 'option contracts');
 
-    unsubscribe(subscribedSecurityIdsRef.current, 'ticker');
+    unsubscribe(subscribedTokensRef.current, 'ticker');
 
     // Clear tracking
-    subscribedSecurityIdsRef.current = [];
-    securityIdMapRef.current.clear();
+    subscribedTokensRef.current = [];
+    tokenMapRef.current.clear();
     lastFetchParamsRef.current = null;
 
   }, [unsubscribe]);
@@ -204,7 +204,7 @@ export function useOptionChain({ segment, securityId, expiry }) {
    * Initial fetch when params change
    */
   useEffect(() => {
-    if (!segment || !securityId) return;
+    if (!name) return;
 
     // Unsubscribe from previous subscriptions
     unsubscribeFromOptionStrikes();
@@ -221,13 +221,13 @@ export function useOptionChain({ segment, securityId, expiry }) {
     return () => {
       unsubscribeFromOptionStrikes();
     };
-  }, [segment, securityId, expiry, isConnected, fetchOptionChain, fetchExpiries, subscribeToOptionStrikes, unsubscribeFromOptionStrikes]);
+  }, [name, segment, expiry, isConnected, fetchOptionChain, fetchExpiries, subscribeToOptionStrikes, unsubscribeFromOptionStrikes]);
 
   /**
    * Re-subscribe when socket reconnects
    */
   useEffect(() => {
-    if (isConnected && chainData && subscribedSecurityIdsRef.current.length === 0) {
+    if (isConnected && chainData && subscribedTokensRef.current.length === 0) {
       console.log('[useOptionChain] Socket reconnected - re-subscribing');
       subscribeToOptionStrikes(chainData);
     }
@@ -261,29 +261,19 @@ export function useOptionChain({ segment, securityId, expiry }) {
         return;
       }
 
-      if (securityIdMapRef.current.size === 0) {
+      if (tokenMapRef.current.size === 0) {
         animationFrameId = requestAnimationFrame(updateLoop);
         return;
       }
 
-      // NSE_FNO exchangeSegment = 2
-      const NSE_FNO_SEGMENT = 2;
-
       let hasUpdates = false;
-      const currentChain = chainDataRef.current; // Read from ref, not state dependency
-
-      // We'll build a map of indices that need updates to avoid iterating the whole chain if possible
-      // But for React state we need a new array reference if ANYTHING changes.
-      // Strategy: Check for changes first, then clone only if needed.
-
-      // OPTIMIZATION: Check if any relevant ticks have changed since last render
-      // We can iterate our subscribed map which is smaller than the ticks map
+      const currentChain = chainDataRef.current;
 
       const pendingUpdates = new Map(); // index -> { call: ltp, put: ltp }
 
-      securityIdMapRef.current.forEach((position, securityId) => {
-        const tickKey = `${NSE_FNO_SEGMENT}-${securityId}`;
-        const tick = ticks.get(tickKey);
+      tokenMapRef.current.forEach((position, token) => {
+        // Ticks are keyed by instrument_token directly (Kite format)
+        const tick = ticks.get(token);
 
         if (tick?.ltp !== undefined && tick.ltp > 0) {
           const { index, type } = position;
@@ -303,9 +293,6 @@ export function useOptionChain({ segment, securityId, expiry }) {
       });
 
       if (pendingUpdates.size > 0) {
-        // Apply updates
-        // console.log(`[useOptionChain] ⚡ RAF UPDATE: ${pendingUpdates.size} rows changed`);
-
         const updatedChain = [...currentChain]; // Shallow clone array
 
         for (const [index, updates] of pendingUpdates.entries()) {

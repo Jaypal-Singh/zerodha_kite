@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { X, ShoppingCart, DollarSign, Hash } from 'lucide-react';
 import { logMarketStatus } from '../../../Utils/marketStatus.js'
-import { getFundsData } from '../../../Utils/fetchFund.jsx'; 
+import { getFundsData } from '../../../Utils/fetchFund.jsx';
 
 const OptionStrikeBottomWindow = ({
     isOpen,
@@ -18,7 +18,7 @@ const OptionStrikeBottomWindow = ({
     const [productType, setProductType] = useState('Intraday');
     const [localLotsStr, setLocalLotsStr] = useState('1');
     const [jobbin_price, setJobbin_price] = useState("0.08");
-    
+
     const [submitting, setSubmitting] = useState(false);
     const [feedback, setFeedback] = useState(null);
     const inputRef = useRef(null);
@@ -33,9 +33,9 @@ const OptionStrikeBottomWindow = ({
     const ltp = strikeData?.ltp || 0;
     const bestBid = strikeData?.bid || 0;
     const bestAsk = strikeData?.ask || 0;
-    
+
     // Lot Size
-    const lotSize = underlyingStock?.lot_size || underlyingStock?.lotSize || 50; 
+    const lotSize = underlyingStock?.lot_size || underlyingStock?.lotSize || 50;
 
     // Reset on Open
     useEffect(() => {
@@ -83,12 +83,12 @@ const OptionStrikeBottomWindow = ({
         if (strikeData?.tradingSymbol) return strikeData.tradingSymbol;
 
         // Priority: underlying_symbol (clean base name) > symbol_name > symbol > tradingSymbol
-        const symbol = underlyingStock?.underlying_symbol 
-                    || underlyingStock?.symbol_name 
-                    || underlyingStock?.name
-                    || underlyingStock?.symbol 
-                    || "UNKNOWN";
-        
+        const symbol = underlyingStock?.underlying_symbol
+            || underlyingStock?.symbol_name
+            || underlyingStock?.name
+            || underlyingStock?.symbol
+            || "UNKNOWN";
+
         let expiryStr = "";
         if (expiry) {
             try {
@@ -96,7 +96,7 @@ const OptionStrikeBottomWindow = ({
                 const day = String(d.getDate()).padStart(2, '0');
                 const month = d.toLocaleString('default', { month: 'short' }).toUpperCase();
                 expiryStr = `${day} ${month}`;
-            } catch(e) {}
+            } catch (e) { }
         }
         const typeStr = (optionType === 'CE' || optionType === 'CALL') ? 'CALL' : 'PUT';
         return `${symbol} ${expiryStr} ${strikePrice} ${typeStr}`.trim();
@@ -108,7 +108,7 @@ const OptionStrikeBottomWindow = ({
         try {
             const date = new Date(dateStr);
             return date.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
-        } catch(e) { return dateStr; }
+        } catch (e) { return dateStr; }
     };
 
     const handleInputChange = (e) => {
@@ -132,61 +132,58 @@ const OptionStrikeBottomWindow = ({
             }
 
             // ============================================================
-            // 🔥 FIX: LOOKUP CORRECT OPTION SECURITY ID FROM INSTRUMENTS
-            // The option chain API doesn't return security_Id for strikes,
-            // so we look it up from our instruments collection
+            // 🔥 FIX: LOOKUP CORRECT OPTION INSTRUMENT TOKEN FROM INSTRUMENTS
+            // The option chain API returns instrument_token for Kite
             // ============================================================
-            let finalSecurityId = String(
-                strikeData?.security_Id || 
-                strikeData?.securityId || 
-                strikeData?.token || 
+            let finalInstrumentToken = String(
+                strikeData?.instrument_token ||
                 ''
             );
 
-            // If strikeData doesn't have security_Id, look it up from instruments
-            if (!finalSecurityId && strikePrice && optionType && expiry) {
+            // If strikeData doesn't have instrument_token, look it up from instruments
+            if (!finalInstrumentToken && strikePrice && optionType && expiry) {
                 try {
-                    const underlyingSymbol = underlyingStock?.underlying_symbol 
-                        || underlyingStock?.symbol_name 
-                        || underlyingStock?.name 
+                    const underlyingSymbol = underlyingStock?.underlying_symbol
+                        || underlyingStock?.symbol_name
+                        || underlyingStock?.name
                         || '';
-                    
+
                     const lookupParams = new URLSearchParams({
-                        underlying_symbol: underlyingSymbol,
+                        name: underlyingSymbol,
                         strike: strikePrice,
                         optionType: optionType === 'CE' || optionType === 'CALL' ? 'CE' : 'PE',
                         expiry: expiry
                     });
 
-                    console.log('[OptionOrder] Looking up security ID:', lookupParams.toString());
+                    console.log('[OptionOrder] Looking up instrument token:', lookupParams.toString());
 
                     const lookupRes = await fetch(`${apiBase}/api/option-chain/security-id?${lookupParams.toString()}`);
-                    
+
                     if (lookupRes.ok) {
                         const lookupData = await lookupRes.json();
-                        if (lookupData.data?.securityId) {
-                            finalSecurityId = String(lookupData.data.securityId);
-                            console.log('[OptionOrder] Found security ID:', finalSecurityId);
+                        // API returns instrument_token (Kite format)
+                        if (lookupData.data?.instrument_token) {
+                            finalInstrumentToken = String(lookupData.data.instrument_token);
+                            console.log('[OptionOrder] Found instrument token:', finalInstrumentToken);
                         }
                     }
                 } catch (lookupErr) {
-                    console.warn('[OptionOrder] Security ID lookup failed:', lookupErr);
+                    console.warn('[OptionOrder] Instrument token lookup failed:', lookupErr);
                 }
             }
 
-            // Last resort fallback to parent's security ID (not ideal but prevents order failure)
-            if (!finalSecurityId) {
-                finalSecurityId = String(
-                    underlyingStock?.security_Id || 
-                    underlyingStock?.securityId || 
+            // Last resort fallback to parent's instrument_token
+            if (!finalInstrumentToken) {
+                finalInstrumentToken = String(
+                    underlyingStock?.instrument_token ||
                     ''
                 );
-                console.warn('[OptionOrder] Using parent security ID as fallback:', finalSecurityId);
+                console.warn('[OptionOrder] Using parent instrument token as fallback:', finalInstrumentToken);
             }
 
-            if (!finalSecurityId) {
-                setFeedback({ type: 'error', message: "Security ID missing. Check console." });
-                console.error("Data Missing for ID:", { strikeData, underlyingStock });
+            if (!finalInstrumentToken) {
+                setFeedback({ type: 'error', message: "Instrument token missing. Check console." });
+                console.error("Data Missing for instrument_token:", { strikeData, underlyingStock });
                 setSubmitting(false);
                 return;
             }
@@ -216,7 +213,7 @@ const OptionStrikeBottomWindow = ({
                         message: `Insufficient ${limitType} Funds! Required: ₹${requiredAmount.toFixed(2)}, Available: ₹${availableLimit.toFixed(2)}. Add funds.`
                     });
                     setSubmitting(false);
-                    return; 
+                    return;
                 }
             } catch (fundErr) {
                 setFeedback({ type: 'error', message: "Fund validation failed. Try again." });
@@ -236,34 +233,31 @@ const OptionStrikeBottomWindow = ({
             const payload = {
                 broker_id_str: brokerId,
                 customer_id_str: customerId,
-                
-                security_Id: finalSecurityId,
-                symbol: instrumentName, 
-                segment: 'NSE_FNO', 
-
+                instrument_token: finalInstrumentToken,
+                symbol: instrumentName,
+                segment: underlyingStock?.segment || 'NFO-OPT',
                 side,
                 product,
                 price: Number(finalPrice),
                 quantity: qtyNum,
                 lots: lotsNum,
                 lot_size: lotSize,
-                
-                jobbin_price: jobbin_price === '' ? 0 : Number(jobbin_price), 
-                
+                jobbin_price: jobbin_price === '' ? 0 : Number(jobbin_price),
                 order_status: "OPEN",
-                
-                meta: { 
-                    from: 'ui_option_chain', 
+                meta: {
+                    from: 'ui_option_chain',
                     underlying: underlyingStock?.name,
                     expiry: expiry,
-                    spotPrice: spotPrice
+                    spotPrice: spotPrice,
+                    strike: strikePrice,
+                    optionType: optionType
                 },
-                
+
                 placed_at: new Date()
             };
 
             console.log('Option Order Payload:', payload);
-            
+
             const res = await fetch(`${apiBase}/api/orders/postOrder`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -298,7 +292,7 @@ const OptionStrikeBottomWindow = ({
         <>
             <div className="fixed inset-0 bg-black/60 z-[110]" onClick={onClose} />
             <div className="fixed bottom-0 left-0 right-0 bg-[#1A1F30] z-[120] rounded-t-2xl max-h-[85vh] overflow-y-auto animate-slide-up">
-                
+
                 {/* Header */}
                 <div className="sticky top-0 bg-[#1A1F30] px-4 py-3 border-b border-white/10">
                     <div className="flex items-center justify-between">
@@ -353,13 +347,13 @@ const OptionStrikeBottomWindow = ({
                     <div>
                         <p className="text-gray-500 text-xs mb-2">Product Type</p>
                         <div className="flex gap-2">
-                            <button 
+                            <button
                                 className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${getProductTypeClass('Intraday')}`}
                                 onClick={() => setProductType('Intraday')}
                             >
                                 Intraday
                             </button>
-                            <button 
+                            <button
                                 className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${getProductTypeClass('Overnight')}`}
                                 onClick={() => setProductType('Overnight')}
                             >
@@ -434,9 +428,8 @@ const OptionStrikeBottomWindow = ({
                             <button
                                 onClick={handleConfirm}
                                 disabled={submitting || !lotsNum}
-                                className={`w-full py-3.5 rounded-lg font-bold text-white text-base transition ${
-                                    actionTab === 'Buy' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'
-                                } ${(submitting || !lotsNum) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                className={`w-full py-3.5 rounded-lg font-bold text-white text-base transition ${actionTab === 'Buy' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'
+                                    } ${(submitting || !lotsNum) ? 'opacity-50 cursor-not-allowed' : ''}`}
                             >
                                 {submitting ? 'Placing Order...' : `INSTANT ${actionTab.toUpperCase()}`}
                             </button>

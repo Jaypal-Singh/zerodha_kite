@@ -15,19 +15,19 @@ const OptionChainView = ({ selectedStock, sheetData }) => {
     const [strikeCount, setStrikeCount] = useState(6); // Default to 6 for compact view
     const [lastUpdateTime, setLastUpdateTime] = useState(null);
     const updateCountRef = useRef(0);
-    
-    const { 
-        chainData, 
-        spotPrice, 
-        expiries, 
-        loading, 
+
+    const {
+        chainData,
+        spotPrice,
+        expiries,
+        loading,
         error,
-        refetch                                                                                                 
+        refetch
     } = useOptionChain({
+        name: selectedStock?.name,
         segment: selectedStock?.segment,
-        securityId: selectedStock?.securityId,
         expiry: selectedExpiry
-    }); 
+    });
 
     // Use live spot price from hook, fallback to sheetData
     const currentPrice = spotPrice || sheetData?.ltp || 0;
@@ -49,7 +49,7 @@ const OptionChainView = ({ selectedStock, sheetData }) => {
         // Find ATM strike (closest to spot price)
         let closestStrike = chainData[0]?.strike;
         let minDiff = Math.abs(chainData[0]?.strike - currentPrice);
-        
+
         chainData.forEach(row => {
             const diff = Math.abs(row.strike - currentPrice);
             if (diff < minDiff) {
@@ -60,16 +60,16 @@ const OptionChainView = ({ selectedStock, sheetData }) => {
 
         // Find index of ATM strike
         const atmIndex = chainData.findIndex(row => row.strike === closestStrike);
-        
+
         // Calculate strikes above and below based on selected count
         const strikesPerSide = Math.floor((strikeCount - 1) / 2);
         let strikesAbove = strikesPerSide;
         let strikesBelow = strikesPerSide;
-        
+
         // Adjust if we don't have enough strikes on one side
         const availableAbove = atmIndex;
         const availableBelow = chainData.length - atmIndex - 1;
-        
+
         if (availableAbove < strikesAbove) {
             strikesAbove = availableAbove;
             strikesBelow = Math.min(availableBelow, strikeCount - strikesAbove - 1);
@@ -82,7 +82,7 @@ const OptionChainView = ({ selectedStock, sheetData }) => {
         // Slice the data
         const startIndex = Math.max(0, atmIndex - strikesAbove);
         const endIndex = Math.min(chainData.length, atmIndex + strikesBelow + 1);
-        
+
         return {
             filteredChain: chainData.slice(startIndex, endIndex),
             atmStrike: closestStrike
@@ -108,7 +108,7 @@ const OptionChainView = ({ selectedStock, sheetData }) => {
                 <div className="text-center">
                     <AlertCircle className="w-6 h-6 inline text-red-400 mb-2" />
                     <p className="text-red-400 text-xs mb-2">{error}</p>
-                    <button 
+                    <button
                         onClick={refetch}
                         className="px-3 py-1 bg-indigo-600 text-white rounded text-xs hover:bg-indigo-700 transition"
                     >
@@ -145,14 +145,14 @@ const OptionChainView = ({ selectedStock, sheetData }) => {
 
     return (
         <div className="w-full h-full flex flex-col text-white">
-            
+
             {/* Compact Header - Fixed */}
             <div className="bg-[#1A1F30] px-3 py-2 flex justify-between items-center text-xs flex-shrink-0 border-b border-white/10">
                 {/* Left: Expiry + Strike Filter */}
                 <div className="flex items-center gap-2">
                     {expiries.length > 0 && (
-                        <select 
-                            value={selectedExpiry || expiries[0]} 
+                        <select
+                            value={selectedExpiry || expiries[0]}
                             onChange={(e) => setSelectedExpiry(e.target.value)}
                             className="bg-[#252B3B] text-white px-2 py-1 rounded text-xs focus:outline-none border border-white/10"
                         >
@@ -161,7 +161,7 @@ const OptionChainView = ({ selectedStock, sheetData }) => {
                             ))}
                         </select>
                     )}
-                    <select 
+                    <select
                         value={strikeCount}
                         onChange={(e) => setStrikeCount(Number(e.target.value))}
                         className="bg-[#252B3B] text-white px-2 py-1 rounded text-xs focus:outline-none border border-white/10"
@@ -176,7 +176,7 @@ const OptionChainView = ({ selectedStock, sheetData }) => {
                 <div className="flex items-center gap-2">
                     <span className="text-yellow-400 font-semibold">₹{Number(currentPrice).toFixed(2)}</span>
                     <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
-                    <button 
+                    <button
                         onClick={() => { refetch(); setLastUpdateTime(new Date()); }}
                         className="p-1 hover:bg-white/10 rounded transition"
                         title="Refresh"
@@ -205,14 +205,14 @@ const OptionChainView = ({ selectedStock, sheetData }) => {
             <div className="flex-1 overflow-y-auto">
                 {filteredChain.map((row) => {
                     const isATM = row.strike === atmStrike;
-                    
+
                     return (
-                        <div 
-                            key={row.strike} 
+                        <div
+                            key={row.strike}
                             className={`
                                 grid grid-cols-3 border-b border-white/5 transition-colors
-                                ${isATM 
-                                    ? 'bg-yellow-500/10 border-yellow-500/30' 
+                                ${isATM
+                                    ? 'bg-yellow-500/10 border-yellow-500/30'
                                     : 'hover:bg-white/5'
                                 }
                             `}
@@ -223,18 +223,18 @@ const OptionChainView = ({ selectedStock, sheetData }) => {
                                     {formatLTP(row.call?.ltp)}
                                 </span>
                             </div>
-                            
+
                             {/* Strike Price */}
                             <div className={`
                                 py-2.5 px-4 text-center font-bold border-x border-white/10
-                                ${isATM 
-                                    ? 'bg-yellow-500/20 text-yellow-300' 
+                                ${isATM
+                                    ? 'bg-yellow-500/20 text-yellow-300'
                                     : 'bg-[#1E2430] text-white'
                                 }
                             `}>
                                 {row.strike}
                             </div>
-                            
+
                             {/* Put LTP */}
                             <div className="py-2.5 px-4 text-center">
                                 <span className={`font-mono ${isATM ? 'text-red-300 font-semibold' : 'text-red-400'}`}>
