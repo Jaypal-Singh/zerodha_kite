@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
 // App version - INCREMENT THIS ON EVERY DEPLOYMENT
-const APP_VERSION = '1.8.8';
+const APP_VERSION = '1.8.9';
 
 // https://vite.dev/config/
 export default defineConfig({
