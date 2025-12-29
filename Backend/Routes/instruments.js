@@ -63,7 +63,7 @@ function getSegmentFilter(category) {
         case "All":
         default:
             // Default: F&O + Commodity (excluding indices and equity for trading)
-            return { $in: ["NFO-FUT", "NFO-OPT", "BFO-FUT", "BFO-OPT", "MCX-FUT", "MCX-OPT"] };
+            return { $in: ["NSE","BSE","NFO-FUT", "NFO-OPT", "BFO-FUT", "BFO-OPT", "MCX-FUT", "MCX-OPT"] };
     }
 }
 
@@ -77,62 +77,188 @@ function isOptions(instrument_type) {
     return ["CE", "PE"].includes(instrument_type);
 }
 
+// ------------------------------------------------------------
+// Smart query parsing – extracts optional segment and type tokens
+// ------------------------------------------------------------
+// Supported segment tokens: NSE, BSE, MCX
+// Supported type tokens: FUT (futures), OPT (options)
+// Example queries:
+//   "RELIANCE NSE FUT" → keyword: "RELIANCE", segments: ["NSE","NFO-FUT","NFO-OPT"], type: "FUT"
+//   "BANKNIFTY MCX OPT" → keyword: "BANKNIFTY", segments: ["MCX-FUT","MCX-OPT"], type: "OPT"
+//   "INFY" → keyword: "INFY", segments: all (default), type: any
+// Returns an object { keyword, segmentFilter, typeFilter }
+function parseSmartQuery(rawQuery) {
+    // Normalize the query and preserve original case for keyword matching
+    const normalizedQuery = rawQuery.trim().toUpperCase();
+    const tokens = normalizedQuery.split(/\s+/);
+    const segmentMap = {
+        NSE: ["NSE", "NFO-FUT", "NFO-OPT"],
+        BSE: ["BSE", "BFO-FUT", "BFO-OPT"],
+        MCX: ["MCX-FUT", "MCX-OPT"],
+        EQUITY: ["NSE", "BSE"],
+        EQUITIES: ["NSE", "BSE"],
+        FUTURES: ["NFO-FUT", "BFO-FUT", "MCX-FUT"],
+        OPTIONS: ["NFO-OPT", "BFO-OPT", "MCX-OPT"]
+    };
+    const typeMap = {
+        FUT: "FUT",
+        FUTURE: "FUT",
+        FUTURES: "FUT",
+        OPT: ["CE", "PE"],
+        OPTION: ["CE", "PE"],
+        OPTIONS: ["CE", "PE"]
+    };
+
+    const segmentTokens = [];
+    const typeTokens = [];
+    const keywordParts = [];
+
+    for (const t of tokens) {
+        if (segmentMap[t]) {
+            segmentTokens.push(t);
+        } else if (typeMap[t]) {
+            typeTokens.push(t);
+        } else {
+            keywordParts.push(t);
+        }
+    }
+
+    // Handle special case where user types something like "TVS MOTOR" but we want to match "TVSMOTOR"
+    // We'll create both versions - with spaces and without spaces
+    let processedKeyword = keywordParts.join(' ');
+    if (keywordParts.length > 1) {
+        // Create a regex that matches both spaced and unspaced versions
+        const spacedKeyword = keywordParts.join('\\s+');
+        const unspacedKeyword = keywordParts.join('');
+        processedKeyword = `(${spacedKeyword}|${unspacedKeyword})`;
+    }
+
+    // Build segment filter – if any segment token present, include all related segments
+    let segmentFilter;
+    if (segmentTokens.length > 0) {
+        const segments = [];
+        segmentTokens.forEach(tok => segments.push(...segmentMap[tok]));
+        segmentFilter = { $in: Array.from(new Set(segments)) };
+    } else {
+        // Default – same as previous "All" filter
+        segmentFilter = { $in: ["NSE","BSE","NFO-FUT", "NFO-OPT", "BFO-FUT", "BFO-OPT", "MCX-FUT", "MCX-OPT"] };
+    }
+
+    // Build type filter – if any type token present, restrict instrument_type accordingly
+    let typeFilter = {};
+    if (typeTokens.length > 0) {
+        // If multiple type tokens, combine with $or (unlikely but safe)
+        const conditions = typeTokens.map(tok => {
+            const val = typeMap[tok];
+            if (Array.isArray(val)) {
+                return { instrument_type: { $in: val } };
+            }
+            return { instrument_type: val };
+        });
+        typeFilter = { $or: conditions };
+    }
+
+    return { keyword: processedKeyword, segmentFilter, typeFilter };
+}
+
+export { parseSmartQuery };
+
 // ==================== SEARCH ENDPOINT ====================
 router.get("/search", async (req, res) => {
     try {
         const q = String(req.query.q || "").trim();
-        const category = String(req.query.category || "All").trim();
+        // Note: We're no longer using the category parameter as we're doing smart parsing
         if (!q) return res.json([]);
 
-        // Cache check
-        const cacheKey = `search:${q.toLowerCase()}:${category}`;
+        // --- Smart query parsing ---
+        // The frontend sends only the raw query string (q). We now interpret optional tokens
+        // such as NSE, BSE, MCX, FUT, OPT to build precise segment and type filters.
+        const { keyword, segmentFilter, typeFilter } = parseSmartQuery(q);
+        // Use the processed keyword directly as it already handles spaced/unspaced variations
+        const regex = new RegExp(keyword, "i");
+        const currentDate = new Date();
+
+        // Cache check - using original query for more accurate caching
+        const cacheKey = `search:${q.toLowerCase()}:${JSON.stringify(segmentFilter)}:${JSON.stringify(typeFilter)}`;
         const now = Date.now();
 
         const redisCache = await getCache(cacheKey);
         if (redisCache) {
-            console.log(`[Search Redis Cache HIT] "${q}" (${category}) - ${redisCache.length} results`);
-            trackSearch(q, category, redisCache.length);
+            console.log(`[Search Redis Cache HIT] "${q}" - ${redisCache.length} results`);
+            // trackSearch(q, "Smart", redisCache.length);
             return res.json(redisCache);
         }
 
         const memoryCached = searchCache.get(cacheKey);
         if (memoryCached && (now - memoryCached.timestamp) < SEARCH_CACHE_TTL) {
-            console.log(`[Search Memory Cache HIT] "${q}" (${category}) - ${memoryCached.results.length} results`);
-            trackSearch(q, category, memoryCached.results.length);
+            console.log(`[Search Memory Cache HIT] "${q}" - ${memoryCached.results.length} results`);
+            // trackSearch(q, "Smart", memoryCached.results.length);
             return res.json(memoryCached.results);
         }
 
-        const regex = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-        const segmentFilter = getSegmentFilter(category);
-        const currentDate = new Date();
+        // ------------------------------------------------------------
+        // New aggregation using $facet to enforce ordering:
+        //   1️⃣ Up to 10 equity instruments (segment NSE/BSE, instrument_type not FUT/CE/PE)
+        //   2️⃣ Futures (instrument_type = "FUT")
+        //   3️⃣ Options (instrument_type = "CE" or "PE")
+        // All results respect the original segment and optional type filters.
+        // ------------------------------------------------------------
+        // For equities, we don't need to filter by expiry since they don't expire
+        // For futures/options, we need to filter by expiry
+        const baseMatch = {
+            segment: segmentFilter,
+            $or: [{ tradingsymbol: regex }, { name: regex }]
+        };
 
-        // Simple search: Get all matching instruments (futures + options)
+        // If a type filter was derived from the smart query, merge it into the match stage
+        if (Object.keys(typeFilter).length) {
+            Object.assign(baseMatch, typeFilter);
+        }
+
         const searchResults = await Instrument.aggregate([
+            { $match: baseMatch },
             {
-                $match: {
-                    segment: segmentFilter,
-                    expiry: { $gte: currentDate },
-                    $or: [
-                        { tradingsymbol: regex },
-                        { name: regex }
+                $facet: {
+                    equities: [
+                        // Equities are in NSE or BSE segments with instrument_type EQ
+                        { $match: {
+                            segment: { $in: ["NSE", "BSE"] },
+                            instrument_type: "EQ",
+                            $or: [{ tradingsymbol: regex }, { name: regex }]
+                        } },
+                        { $sort: { tradingsymbol: 1 } }, // simple alphabetical sort for equities
+                        { $limit: 15 } // Increased to 15 as requested
+                    ],
+                    futures: [
+                        { $match: {
+                            instrument_type: "FUT",
+                            expiry: { $gte: currentDate }
+                        } },
+                        // Prioritize nearest expiry
+                        { $addFields: { expiryScore: { $subtract: [0, { $toLong: "$expiry" }] } } },
+                        { $sort: { expiryScore: -1 } },
+                        { $limit: 200 }
+                    ],
+                    options: [
+                        { $match: {
+                            instrument_type: { $in: ["CE", "PE"] },
+                            expiry: { $gte: currentDate }
+                        } },
+                        { $addFields: { expiryScore: { $subtract: [0, { $toLong: "$expiry" }] } } },
+                        { $sort: { expiryScore: -1 } },
+                        { $limit: 200 }
                     ]
                 }
             },
+            // Combine the three arrays while preserving order
             {
-                $addFields: {
-                    // Prioritize futures over options
-                    typeScore: {
-                        $cond: {
-                            if: { $eq: ["$instrument_type", "FUT"] },
-                            then: 1000,
-                            else: 0
-                        }
-                    },
-                    // Sort by nearest expiry first
-                    expiryScore: { $subtract: [0, { $toLong: "$expiry" }] }
+                $project: {
+                    combined: { $concatArrays: ["$equities", "$futures", "$options"] }
                 }
             },
-            { $sort: { typeScore: -1, expiryScore: -1 } },
+            { $unwind: "$combined" },
+            { $replaceRoot: { newRoot: "$combined" } },
+            // Final overall limit (including the 10 equity cap already applied)
             { $limit: 200 }
         ]);
 
@@ -154,8 +280,11 @@ router.get("/search", async (req, res) => {
         }));
 
         console.log(`[Search] Returning ${results.length} results for "${q}"`);
-        trackSearch(q, category, results.length);
+        // trackSearch(q, "Smart", results.length);
+        // Store the combined, ordered result set in both memory and Redis caches
+        // The result shape is an array of instrument objects (already ordered by equities → futures → options)
         searchCache.set(cacheKey, { results, timestamp: Date.now() });
+        // Redis cache expects the raw array; we keep the same TTL (120 seconds)
         setCache(cacheKey, results, 120).catch(console.error);
         res.json(results);
 

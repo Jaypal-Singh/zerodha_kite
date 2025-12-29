@@ -57,7 +57,7 @@ export function normalizeToOptionSegment(segment) {
 /**
  * Get spot price for an underlying
  * Handles indices, stocks, and MCX commodities
- * 
+ *
  * @param {string} underlyingName - e.g., "NIFTY", "HDFCBANK", "GOLD"
  * @param {string} segment - e.g., "NFO-OPT", "BFO-OPT", "MCX-OPT"
  * @returns {Promise<number|null>} Spot price or null if not found
@@ -112,9 +112,80 @@ export async function getSpotPrice(underlyingName, segment) {
 }
 
 /**
+ * Get spot instrument info for an underlying
+ * Handles indices, stocks, and MCX commodities
+ *
+ * @param {string} underlyingName - e.g., "NIFTY", "HDFCBANK", "GOLD"
+ * @param {string} segment - e.g., "NFO-OPT", "BFO-OPT", "MCX-OPT"
+ * @returns {Promise<Object|null>} Spot instrument info or null if not found
+ */
+export async function getSpotInstrumentInfo(underlyingName, segment) {
+    try {
+        // 1. Check if it's a known INDEX
+        const indexInfo = INDEX_UNDERLYING_MAP[underlyingName];
+        if (indexInfo && indexInfo.token) {
+            console.log(`[KiteOptionChain] Getting spot instrument for index: ${underlyingName} -> token ${indexInfo.token}`);
+            return {
+                token: indexInfo.token,
+                type: 'index',
+                tradingsymbol: indexInfo.tradingsymbol,
+                exchange: indexInfo.exchange
+            };
+        }
+
+        // 2. For STOCK OPTIONS (NFO-OPT/BFO-OPT), get equity instrument info
+        const equitySegment = OPTION_TO_EQUITY_SEGMENT[segment];
+        if (equitySegment) {
+            console.log(`[KiteOptionChain] Getting spot instrument for stock: ${underlyingName} in ${equitySegment}`);
+            const stock = await Instrument.findOne({
+                tradingsymbol: underlyingName,
+                segment: equitySegment
+            }).lean();
+
+            if (stock) {
+                return {
+                    token: stock.instrument_token,
+                    type: 'stock',
+                    tradingsymbol: stock.tradingsymbol,
+                    exchange: stock.exchange,
+                    lot_size: stock.lot_size
+                };
+            }
+        }
+
+        // 3. For MCX (Commodities) - use near month future as spot reference
+        if (segment && segment.startsWith('MCX')) {
+            console.log(`[KiteOptionChain] Getting spot instrument for MCX: ${underlyingName} from near month future`);
+            const nearFuture = await Instrument.findOne({
+                name: underlyingName,
+                segment: 'MCX-FUT',
+                expiry: { $gte: new Date() }
+            }).sort({ expiry: 1 }).lean();
+
+            if (nearFuture) {
+                return {
+                    token: nearFuture.instrument_token,
+                    type: 'commodity_future',
+                    tradingsymbol: nearFuture.tradingsymbol,
+                    exchange: nearFuture.exchange,
+                    lot_size: nearFuture.lot_size
+                };
+            }
+        }
+
+        console.warn(`[KiteOptionChain] Could not find spot instrument for: ${underlyingName} (${segment})`);
+        return null;
+
+    } catch (error) {
+        console.error('[KiteOptionChain] Error getting spot instrument info:', error.message);
+        return null;
+    }
+}
+
+/**
  * Get list of available expiry dates for an underlying
  * 
- * @param {string} underlyingName - e.g., "NIFTY", "HDFCBANK"
+ * @param {string} underlyingName - e.g., "NIFTY", "HDFCBANK", "AXIS BANK"
  * @param {string} segment - e.g., "NFO-OPT", "BFO-OPT", "MCX-OPT"
  * @returns {Promise<string[]>} Array of expiry dates in YYYY-MM-DD format
  */
@@ -122,11 +193,38 @@ export async function getExpiryList(underlyingName, segment = 'NFO-OPT') {
     try {
         console.log(`[KiteOptionChain] Getting expiries for: ${underlyingName} (${segment})`);
 
-        const expiries = await Instrument.distinct('expiry', {
+        let expiries = await Instrument.distinct('expiry', {
             name: underlyingName,
             segment: segment,
             expiry: { $gte: new Date() }
         });
+
+        // Fallback: For equity options (NFO-OPT/BFO-OPT), if no results found,
+        // try searching with the equity's tradingsymbol (handles names with spaces)
+        if ((!expiries || expiries.length === 0) && (segment === 'NFO-OPT' || segment === 'BFO-OPT')) {
+            console.log(`[KiteOptionChain] No expiries found with name="${underlyingName}", trying tradingsymbol fallback...`);
+            
+            // Get the equity segment for lookup
+            const equitySegment = OPTION_TO_EQUITY_SEGMENT[segment];
+            if (equitySegment) {
+                // Look up the equity instrument to get its tradingsymbol
+                const equityInstrument = await Instrument.findOne({
+                    name: underlyingName,
+                    segment: equitySegment
+                }).lean();
+
+                if (equityInstrument && equityInstrument.tradingsymbol) {
+                    console.log(`[KiteOptionChain] Found equity tradingsymbol: ${equityInstrument.tradingsymbol}, retrying...`);
+                    
+                    // Retry with tradingsymbol
+                    expiries = await Instrument.distinct('expiry', {
+                        name: equityInstrument.tradingsymbol,
+                        segment: segment,
+                        expiry: { $gte: new Date() }
+                    });
+                }
+            }
+        }
 
         if (!expiries || expiries.length === 0) {
             console.warn(`[KiteOptionChain] No expiries found for ${underlyingName}`);
@@ -179,12 +277,40 @@ export async function getOptionChain(underlyingName, segment = 'NFO-OPT', expiry
         expiryEnd.setHours(23, 59, 59, 999);
 
         // Query all options for this underlying and expiry
-        const options = await Instrument.find({
+        let options = await Instrument.find({
             name: underlyingName,
             segment: segment,
             expiry: { $gte: expiryStart, $lte: expiryEnd },
             instrument_type: { $in: ['CE', 'PE'] }
         }).lean();
+
+        // Fallback: For equity options (NFO-OPT/BFO-OPT), if no results found,
+        // try searching with the equity's tradingsymbol (handles names with spaces)
+        if ((!options || options.length === 0) && (segment === 'NFO-OPT' || segment === 'BFO-OPT')) {
+            console.log(`[KiteOptionChain] No options found with name="${underlyingName}", trying tradingsymbol fallback...`);
+            
+            // Get the equity segment for lookup
+            const equitySegment = OPTION_TO_EQUITY_SEGMENT[segment];
+            if (equitySegment) {
+                // Look up the equity instrument to get its tradingsymbol
+                const equityInstrument = await Instrument.findOne({
+                    name: underlyingName,
+                    segment: equitySegment
+                }).lean();
+
+                if (equityInstrument && equityInstrument.tradingsymbol) {
+                    console.log(`[KiteOptionChain] Found equity tradingsymbol: ${equityInstrument.tradingsymbol}, retrying...`);
+                    
+                    // Retry with tradingsymbol
+                    options = await Instrument.find({
+                        name: equityInstrument.tradingsymbol,
+                        segment: segment,
+                        expiry: { $gte: expiryStart, $lte: expiryEnd },
+                        instrument_type: { $in: ['CE', 'PE'] }
+                    }).lean();
+                }
+            }
+        }
 
         if (!options || options.length === 0) {
             console.warn(`[KiteOptionChain] No options found for ${underlyingName} ${expiry}`);
@@ -224,14 +350,14 @@ export async function getOptionChain(underlyingName, segment = 'NFO-OPT', expiry
         const chain = Array.from(strikeMap.values())
             .sort((a, b) => a.strike - b.strike);
 
-        // Get spot price
-        const spotPrice = await getSpotPrice(underlyingName, segment);
+        // Get spot instrument info
+        const spotInstrumentInfo = await getSpotInstrumentInfo(underlyingName, segment);
 
-        console.log(`[KiteOptionChain] Built chain with ${chain.length} strikes, spot: ${spotPrice}`);
+        console.log(`[KiteOptionChain] Built chain with ${chain.length} strikes, spot instrument:`, spotInstrumentInfo);
 
         return {
             chain,
-            spotPrice,
+            spotInstrumentInfo,
             totalStrikes: chain.length
         };
 

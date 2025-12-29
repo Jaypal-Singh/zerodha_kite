@@ -138,7 +138,7 @@ function SearchPage() {
     if (!Array.isArray(instruments)) return [];
 
     // Segments to exclude from search results
-    const EXCLUDED_SEGMENTS = ['INDICES', 'NSE', 'BSE', 'CDS-FUT', 'CDS-OPT'];
+    const EXCLUDED_SEGMENTS = ['INDICES', 'CDS-FUT', 'CDS-OPT'];
 
     return instruments
       .filter(one => !EXCLUDED_SEGMENTS.includes(one.segment))
@@ -445,23 +445,47 @@ function SearchPage() {
       )}
 
       <ul className="space-y-2 text-sm md:text-base p-2 flex-grow overflow-y-auto mt-4">
-        {!isSearching && searchResults && searchResults.map(stock => {
-          const priceData = livePrices[stock.id] || {};
-          const ltp = priceData.ltp;
-          const percentChange = priceData.percentChange;
+        {/* Render grouped results with optional section headers */}
+        {!isSearching && searchResults && (() => {
+          const groups = [];
+          let currentType = null;
+          searchResults.forEach(stock => {
+            const type = stock.instrument_type;
+            // Determine display group label
+            let label = null;
+            if (type === "FUT") label = "Futures";
+            else if (["CE", "PE"].includes(type)) label = "Options";
+            else label = "Equities"; // includes EQ or any non‑FUT/OPT
 
-          return (
-            <WatchlistItem
-              key={stock.id}
-              name={stock.tradingSymbol}
-              exchange={stock.exchange || "—"}
-              underlyingName={stock.name}
-              ltp={ltp}
-              percentChange={percentChange}
-              onClick={() => handleAddToWatchlist(stock)}
-            />
-          );
-        })}
+            if (label !== currentType) {
+              groups.push({ header: label, items: [] });
+              currentType = label;
+            }
+            groups[groups.length - 1].items.push(stock);
+          });
+
+          return groups.map((group, gi) => (
+            <React.Fragment key={gi}>
+              <li className="font-semibold text-[var(--text-primary)] mt-2 mb-1">{group.header}</li>
+              {group.items.map(stock => {
+                const priceData = livePrices[stock.id] || {};
+                const ltp = priceData.ltp;
+                const percentChange = priceData.percentChange;
+                return (
+                  <WatchlistItem
+                    key={stock.id}
+                    name={stock.tradingSymbol}
+                    exchange={stock.exchange || "—"}
+                    underlyingName={stock.name}
+                    ltp={ltp}
+                    percentChange={percentChange}
+                    onClick={() => handleAddToWatchlist(stock)}
+                  />
+                );
+              })}
+            </React.Fragment>
+          ));
+        })()}
         {searchResults && searchResults.length === 0 && (
           <p className="text-center text-[var(--text-secondary)] pt-4">No symbols matched your search.</p>
         )}

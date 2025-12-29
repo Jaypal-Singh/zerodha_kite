@@ -12,6 +12,7 @@ const apiBase = import.meta.env.VITE_REACT_APP_API_URL || 'http://localhost:8080
 export function useOptionChain({ name, segment, expiry }) {
   const [chainData, setChainData] = useState(null);
   const [spotPrice, setSpotPrice] = useState(null);
+  const [spotInstrumentInfo, setSpotInstrumentInfo] = useState(null);
   const [expiries, setExpiries] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -68,12 +69,13 @@ export function useOptionChain({ name, segment, expiry }) {
       const result = await response.json();
       console.log('[useOptionChain] Received data:', {
         totalStrikes: result.data?.chain?.length,
-        spotPrice: result.data?.spotPrice,
+        spotInstrumentInfo: result.data?.spotInstrumentInfo,
         expiry: result.data?.expiry
       });
 
       setChainData(result.data.chain);
-      setSpotPrice(result.data.spotPrice);
+      setSpotInstrumentInfo(result.data.spotInstrumentInfo);
+      setSpotPrice(null); // Reset spot price until we get WebSocket update
 
       lastFetchParamsRef.current = paramsKey;
       return result.data;
@@ -212,6 +214,11 @@ export function useOptionChain({ name, segment, expiry }) {
     fetchOptionChain().then(data => {
       if (data?.chain && isConnected) {
         subscribeToOptionStrikes(data.chain);
+        
+        // NEW: Subscribe to spot instrument if available
+        if (data.spotInstrumentInfo?.token) {
+          subscribe([{ instrument_token: data.spotInstrumentInfo.token }], 'ticker');
+        }
       }
     });
 
@@ -220,6 +227,10 @@ export function useOptionChain({ name, segment, expiry }) {
     // Cleanup on unmount or param change
     return () => {
       unsubscribeFromOptionStrikes();
+      // NEW: Unsubscribe from spot instrument if needed
+      if (spotInstrumentInfo?.token) {
+        unsubscribe([{ instrument_token: spotInstrumentInfo.token }], 'ticker');
+      }
     };
   }, [name, segment, expiry, isConnected, fetchOptionChain, fetchExpiries, subscribeToOptionStrikes, unsubscribeFromOptionStrikes]);
 
@@ -325,9 +336,51 @@ export function useOptionChain({ name, segment, expiry }) {
     };
   }, []); // Empty dependency array = runs once on mount, but closes over Refs
 
+  // Add spot price calculation from WebSocket updates
+  useEffect(() => {
+    if (!spotInstrumentInfo?.token) return;
+
+    let animationFrameId;
+    let lastUpdate = 0;
+    const THROTTLE_MS = 50; // Update UI max 20 times per second
+
+    const spotUpdateLoop = (timestamp) => {
+      // Throttle checks
+      if (timestamp - lastUpdate < THROTTLE_MS) {
+        animationFrameId = requestAnimationFrame(spotUpdateLoop);
+        return;
+      }
+
+      const ticks = ticksRef.current;
+      if (!ticks.size) {
+        animationFrameId = requestAnimationFrame(spotUpdateLoop);
+        return;
+      }
+
+      // Check for spot instrument updates
+      const spotTick = ticks.get(String(spotInstrumentInfo.token));
+      if (spotTick?.ltp !== undefined && spotTick.ltp > 0) {
+        if (spotPrice !== spotTick.ltp) {
+          setSpotPrice(spotTick.ltp);
+          lastUpdate = timestamp;
+        }
+      }
+
+      animationFrameId = requestAnimationFrame(spotUpdateLoop);
+    };
+
+    // Start the loop
+    animationFrameId = requestAnimationFrame(spotUpdateLoop);
+
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+    };
+  }, [spotInstrumentInfo, spotPrice, ticksRef]);
+
   return {
     chainData,
-    spotPrice,
+    spotPrice, // This will now be updated via WebSocket
+    spotInstrumentInfo, // NEW: Expose spot instrument info
     expiries,
     loading,
     error,

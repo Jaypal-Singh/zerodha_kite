@@ -103,7 +103,7 @@ export function createApp() {
   app.use("/api/registration", registrationRoute); // Public - no auth required
 
   // Version endpoint for cache busting - INCREMENT VERSION ON EVERY DEPLOYMENT
-  const APP_VERSION = '1.8.3';
+  const APP_VERSION = '1.8.8';
   app.get("/api/version", (_req, res) => {
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.set('Pragma', 'no-cache');

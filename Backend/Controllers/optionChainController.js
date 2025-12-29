@@ -66,7 +66,7 @@ async function getOptionChain(req, res) {
 
         console.log('[OptionChainController] Success:', {
             totalStrikes: optionChainData.totalStrikes,
-            spotPrice: optionChainData.spotPrice
+            spotInstrumentInfo: optionChainData.spotInstrumentInfo
         });
 
         // Return response (same format as before for frontend compatibility)
@@ -76,7 +76,7 @@ async function getOptionChain(req, res) {
                 underlying: underlyingName,
                 segment: optionSegment,
                 expiry: targetExpiry,
-                spotPrice: optionChainData.spotPrice,
+                spotInstrumentInfo: optionChainData.spotInstrumentInfo,
                 chain: optionChainData.chain,
                 meta: {
                     totalStrikes: optionChainData.totalStrikes,

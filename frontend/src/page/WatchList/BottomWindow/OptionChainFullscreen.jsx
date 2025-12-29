@@ -66,6 +66,8 @@ const OptionChainFullscreen = ({ selectedStock, sheetData, onClose }) => {
 
     // Use live spot price from hook, fallback to sheetData
     const currentPrice = spotPrice || sheetData?.ltp || 0;
+    // Show loading placeholder for spot price when a new expiry is being fetched
+    const spotLoading = loading && spotPrice === null;
 
     // Find ATM strike and filter data around it
     const { filteredChain, atmStrike } = useMemo(() => {
@@ -296,11 +298,11 @@ const OptionChainFullscreen = ({ selectedStock, sheetData, onClose }) => {
 
                                 // Handler for clicking on Call LTP
                                 const handleCallClick = () => {
-                                    if (row.call?.ltp) {
+                                    if (row.call?.instrument_token) {
                                         setSelectedStrike({
                                             strike: row.strike,
                                             type: 'CE',
-                                            data: row.call,
+                                            instrumentToken: row.call.instrument_token,
                                             instrumentName: selectedStock?.name || selectedStock?.tradingSymbol,
                                             expiry: selectedExpiry || (expiries && expiries[0]),
                                         });
@@ -309,11 +311,11 @@ const OptionChainFullscreen = ({ selectedStock, sheetData, onClose }) => {
 
                                 // Handler for clicking on Put LTP
                                 const handlePutClick = () => {
-                                    if (row.put?.ltp) {
+                                    if (row.put?.instrument_token) {
                                         setSelectedStrike({
                                             strike: row.strike,
                                             type: 'PE',
-                                            data: row.put,
+                                            instrumentToken: row.put.instrument_token,
                                             instrumentName: selectedStock?.name || selectedStock?.tradingSymbol,
                                             expiry: selectedExpiry || (expiries && expiries[0]),
                                         });
@@ -389,7 +391,7 @@ const OptionChainFullscreen = ({ selectedStock, sheetData, onClose }) => {
                 onClose={() => setSelectedStrike(null)}
                 optionType={selectedStrike?.type}
                 strikePrice={selectedStrike?.strike}
-                strikeData={selectedStrike?.data}
+                instrumentToken={selectedStrike?.instrumentToken}
                 underlyingStock={selectedStock}
                 spotPrice={currentPrice}
                 expiry={selectedStrike?.expiry}

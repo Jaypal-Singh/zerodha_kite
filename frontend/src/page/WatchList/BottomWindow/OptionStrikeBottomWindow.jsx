@@ -2,17 +2,21 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { X, ShoppingCart, DollarSign, Hash } from 'lucide-react';
 import { logMarketStatus } from '../../../Utils/marketStatus.js'
 import { getFundsData } from '../../../Utils/fetchFund.jsx';
+import { useMarketData } from '../../../contexts/MarketDataContext';
 
 const OptionStrikeBottomWindow = ({
     isOpen,
     onClose,
     optionType,          // 'CE' | 'PE'
     strikePrice,         // Number
-    strikeData,          // Object (LTP etc.)
+    instrumentToken,     // String (instrument token)
     underlyingStock,     // Object (Parent Info)
     spotPrice,           // Number
     expiry,              // String
 }) => {
+    // --- Market Data Context ---
+    const { subscribe, unsubscribe, ticksRef } = useMarketData();
+
     // --- Local States ---
     const [actionTab, setActionTab] = useState('Buy');
     const [productType, setProductType] = useState('Intraday');
@@ -21,6 +25,7 @@ const OptionStrikeBottomWindow = ({
 
     const [submitting, setSubmitting] = useState(false);
     const [feedback, setFeedback] = useState(null);
+    const [dataUpdateTrigger, setDataUpdateTrigger] = useState(0); // To trigger re-renders on data updates
     const inputRef = useRef(null);
 
     // --- Context & Role ---
@@ -29,10 +34,22 @@ const OptionStrikeBottomWindow = ({
     const userObject = userString ? JSON.parse(userString) : {};
     const userRole = userObject.role;
 
+    // Get live data from ticksRef
+    const liveData = useMemo(() => {
+        if (!instrumentToken || !ticksRef.current) return null;
+        return ticksRef.current.get(String(instrumentToken)) || null;
+    }, [instrumentToken, ticksRef, dataUpdateTrigger]);
+
+    // Get live data from ticksRef (full data when window is open)
+    const liveDataFull = useMemo(() => {
+        if (!instrumentToken || !ticksRef.current) return null;
+        return ticksRef.current.get(String(instrumentToken)) || null;
+    }, [instrumentToken, ticksRef, dataUpdateTrigger]);
+
     // --- Derived Values ---
-    const ltp = strikeData?.ltp || 0;
-    const bestBid = strikeData?.bid || 0;
-    const bestAsk = strikeData?.ask || 0;
+    const ltp = liveDataFull?.ltp || liveData?.ltp || 0;
+    const bestBid = liveDataFull?.bestBidPrice || liveData?.bestBidPrice || 0;
+    const bestAsk = liveDataFull?.bestAskPrice || liveData?.bestAskPrice || 0;
 
     // Lot Size
     const lotSize = underlyingStock?.lot_size || underlyingStock?.lotSize || 50;
@@ -46,6 +63,35 @@ const OptionStrikeBottomWindow = ({
             setProductType('Intraday');
         }
     }, [isOpen, strikePrice, optionType]);
+
+    // Subscribe to full market data when window opens
+    useEffect(() => {
+        if (isOpen && instrumentToken) {
+            // Subscribe to full market data for this instrument
+            subscribe([{ instrument_token: instrumentToken }], 'full');
+        }
+        
+        // Unsubscribe when window closes
+        return () => {
+            if (instrumentToken) {
+                unsubscribe([{ instrument_token: instrumentToken }], 'full');
+            }
+        };
+    }, [isOpen, instrumentToken, subscribe, unsubscribe]);
+
+    // Trigger re-renders when tick data updates
+    useEffect(() => {
+        let interval;
+        if (isOpen) {
+            // When window is open, check for updates more frequently
+            interval = setInterval(() => {
+                setDataUpdateTrigger(prev => prev + 1);
+            }, 100); // Update every 100ms for smooth UI updates
+        }
+        return () => {
+            if (interval) clearInterval(interval);
+        };
+    }, [isOpen]);
 
     // --- Calculations ---
     const lotsNum = useMemo(() => {
@@ -80,8 +126,6 @@ const OptionStrikeBottomWindow = ({
     // For Option Chain orders, use underlying_symbol (clean base name like "HDFCBANK", "NIFTY")
     // This prevents names like "HDFCBANK 30 DEC 870 CALL 30 DEC 985 CALL"
     const getInstrumentName = () => {
-        if (strikeData?.tradingSymbol) return strikeData.tradingSymbol;
-
         // Priority: underlying_symbol (clean base name) > symbol_name > symbol > tradingSymbol
         const symbol = underlyingStock?.underlying_symbol
             || underlyingStock?.symbol_name
@@ -136,7 +180,7 @@ const OptionStrikeBottomWindow = ({
             // The option chain API returns instrument_token for Kite
             // ============================================================
             let finalInstrumentToken = String(
-                strikeData?.instrument_token ||
+                instrumentToken ||
                 ''
             );
 
@@ -183,7 +227,7 @@ const OptionStrikeBottomWindow = ({
 
             if (!finalInstrumentToken) {
                 setFeedback({ type: 'error', message: "Instrument token missing. Check console." });
-                console.error("Data Missing for instrument_token:", { strikeData, underlyingStock });
+                console.error("Data Missing for instrument_token:", { instrumentToken, underlyingStock });
                 setSubmitting(false);
                 return;
             }
