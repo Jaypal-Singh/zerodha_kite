@@ -1,5 +1,7 @@
 import mongoose from 'mongoose';
 import { getKiteLTP } from '../../services/kiteQuote.js';
+import Order from '../../Model/OrdersModel.js';
+import Fund from '../../Model/FundModel.js';
 
 // ---------------------------------------------------------
 // 1. HELPER: Fetch Live LTP (Using Kite Quote API)
@@ -109,7 +111,7 @@ async function placeMarketOrder(orderId) {
         }
 
         // 3. Determine 'came_From'
-        const prevStatus = order.order_status || order.orderStatus || '';
+        let prevStatus = order.order_status || order.orderStatus || '';
         if (order.order_category === 'OVERNIGHT') prevStatus = order.order_category;
 
         let cameFrom = 'Hold';
